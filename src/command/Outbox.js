@@ -1,3 +1,5 @@
+import { VoiceOutput } from '../voice/VoiceOutput.js';
+
 export class Outbox {
   constructor(voiceOutput, executor) {
     this.voiceOutput = voiceOutput;
@@ -5,6 +7,13 @@ export class Outbox {
 
     this.queue = [];
     this.holdTime = 3000;     // ms, for mouse/keyboard commands
+
+    // Communications components (set by main.js)
+    this.commsLog = null;
+    this.subtitles = null;
+
+    // Simulation reference for flight lookup (set by main.js)
+    this.simulation = null;
   }
 
   add(command, immediate = false) {
@@ -67,10 +76,76 @@ export class Outbox {
     entry.sent = true;
     entry.command.timestamp = Date.now();
 
-    // Execute the command
-    this.executor.execute(entry.command);
+    const command = entry.command;
 
-    // Voice output would go here in Phase 3+
+    // Get flight for context
+    const flight = this.simulation?.getFlightByCallsign(command.callsign);
+
+    // Generate GCI command message for logging
+    const gciMessage = this.generateGciMessage(command);
+
+    // Log player command to comms log
+    if (this.commsLog && gciMessage) {
+      this.commsLog.logGciCommand(command.callsign, gciMessage);
+    }
+
+    // Execute the command
+    const success = this.executor.execute(command);
+
+    // Generate and play pilot acknowledgment
+    if (success && flight) {
+      const pilotCallsign = flight.lead?.callsign || `${flight.callsign}-1`;
+      const ackMessage = VoiceOutput.generateAcknowledgment(command, pilotCallsign);
+
+      // Log pilot response to comms log
+      if (this.commsLog) {
+        this.commsLog.logPilotResponse(pilotCallsign, ackMessage);
+      }
+
+      // Show subtitle
+      if (this.subtitles) {
+        this.subtitles.show(pilotCallsign, ackMessage);
+      }
+
+      // Speak acknowledgment
+      if (this.voiceOutput) {
+        this.voiceOutput.speakAsPilot(pilotCallsign, ackMessage);
+      }
+    }
+  }
+
+  /**
+   * Generate GCI command message for logging
+   * @param {Object} command
+   * @returns {string}
+   */
+  generateGciMessage(command) {
+    switch (command.type) {
+      case 'SNAP':
+        return `snap ${command.params.heading}`;
+      case 'VECTOR':
+        return `vector ${command.params.heading}`;
+      case 'ANGELS':
+        return `angels ${Math.round(command.params.altitude / 1000)}`;
+      case 'BUSTER':
+        return 'buster';
+      case 'GATE':
+        return 'gate';
+      case 'RTB':
+        return 'RTB';
+      case 'ENGAGE':
+        return `engage ${command.params.target}`;
+      case 'DEFENSIVE':
+        return 'defensive';
+      case 'WEAPONS_FREE':
+        return 'weapons free';
+      case 'WEAPONS_HOLD':
+        return 'weapons hold';
+      case 'WEAPONS_TIGHT':
+        return 'weapons tight';
+      default:
+        return command.type.toLowerCase();
+    }
   }
 
   getQueue() {

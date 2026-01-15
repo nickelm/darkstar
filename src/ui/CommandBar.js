@@ -13,6 +13,12 @@ export class CommandBar {
     this.selectedParams = {};
 
     this.elements = {};
+
+    // Voice input reference (set by main.js)
+    this.voiceInput = null;
+
+    // PTT state
+    this.pttState = 'idle';  // 'idle', 'listening', 'processing', 'aborted'
   }
 
   init() {
@@ -22,6 +28,10 @@ export class CommandBar {
 
   render() {
     this.container.innerHTML = `
+      <button class="cmd-ptt" title="Push to Talk (\`)">
+        <span class="ptt-icon"></span>
+        <span class="ptt-status">PTT</span>
+      </button>
       <div class="cmd-slot cmd-callsign" data-slot="callsign">
         <span class="slot-label">Callsign</span>
         <span class="slot-value">-</span>
@@ -40,6 +50,9 @@ export class CommandBar {
     `;
 
     // Cache element references
+    this.elements.pttBtn = this.container.querySelector('.cmd-ptt');
+    this.elements.pttIcon = this.container.querySelector('.ptt-icon');
+    this.elements.pttStatus = this.container.querySelector('.ptt-status');
     this.elements.callsignSlot = this.container.querySelector('[data-slot="callsign"]');
     this.elements.commandSlot = this.container.querySelector('[data-slot="command"]');
     this.elements.paramSlot = this.container.querySelector('[data-slot="param"]');
@@ -49,6 +62,9 @@ export class CommandBar {
   }
 
   bindEvents() {
+    // PTT button events
+    this.bindPttEvents();
+
     // Callsign slot click
     this.elements.callsignSlot.addEventListener('click', () => {
       this.openCallsignMenu();
@@ -336,5 +352,107 @@ export class CommandBar {
 
   handleKeydown(event) {
     // Future keyboard handling
+  }
+
+  /**
+   * Set voice input reference and wire up callbacks
+   * @param {VoiceInput} voiceInput
+   */
+  setVoiceInput(voiceInput) {
+    this.voiceInput = voiceInput;
+
+    if (this.voiceInput) {
+      // Wire up state change callback
+      this.voiceInput.onStateChange = (state) => {
+        this.setPttState(state);
+      };
+    }
+  }
+
+  /**
+   * Start PTT (push to talk)
+   */
+  startPtt() {
+    if (!this.voiceInput) {
+      console.warn('Voice input not available');
+      return;
+    }
+
+    this.voiceInput.start();
+  }
+
+  /**
+   * Stop PTT (release)
+   */
+  stopPtt() {
+    if (!this.voiceInput) return;
+    this.voiceInput.stop();
+  }
+
+  /**
+   * Set PTT visual state
+   * @param {string} state - 'idle', 'listening', 'processing', 'aborted'
+   */
+  setPttState(state) {
+    this.pttState = state;
+
+    const btn = this.elements.pttBtn;
+    const status = this.elements.pttStatus;
+
+    if (!btn || !status) return;
+
+    // Remove all state classes
+    btn.classList.remove('ptt-idle', 'ptt-listening', 'ptt-processing', 'ptt-aborted');
+
+    // Add current state class
+    btn.classList.add(`ptt-${state}`);
+
+    // Update status text
+    switch (state) {
+      case 'listening':
+        status.textContent = 'LISTENING...';
+        break;
+      case 'processing':
+        status.textContent = 'PROCESSING...';
+        break;
+      case 'aborted':
+        status.textContent = 'CANCELLED';
+        break;
+      default:
+        status.textContent = 'PTT';
+    }
+  }
+
+  /**
+   * Bind PTT button events
+   */
+  bindPttEvents() {
+    if (!this.elements.pttBtn) return;
+
+    // Mouse events
+    this.elements.pttBtn.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      this.startPtt();
+    });
+
+    this.elements.pttBtn.addEventListener('mouseup', () => {
+      this.stopPtt();
+    });
+
+    this.elements.pttBtn.addEventListener('mouseleave', () => {
+      if (this.pttState === 'listening') {
+        this.stopPtt();
+      }
+    });
+
+    // Touch events for mobile
+    this.elements.pttBtn.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      this.startPtt();
+    });
+
+    this.elements.pttBtn.addEventListener('touchend', () => {
+      this.stopPtt();
+    });
   }
 }
