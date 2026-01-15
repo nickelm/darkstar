@@ -1,0 +1,296 @@
+/* Darkstar - Phase 2 Styles */
+
+/* Reset and base */
+html, body, #app {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: #0a0a14;
+  color: #eee;
+}
+
+/* Game container */
+#game {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* Map area */
+#map {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 200px;
+  bottom: 60px;
+  background: #1a1a2e;
+}
+
+/* Canvas overlay for tracks */
+.track-canvas {
+  pointer-events: auto;
+}
+
+/* Command bar at bottom */
+#command-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 200px;
+  height: 60px;
+  background: #1a1a2e;
+  border-top: 1px solid #333;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  box-sizing: border-box;
+}
+
+/* Side panel */
+#side-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 200px;
+  bottom: 0;
+  background: #1a1a2e;
+  border-left: 1px solid #333;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+/* Command bar slots */
+.cmd-slot {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 16px;
+  margin-right: 10px;
+  background: #252540;
+  border-radius: 4px;
+  cursor: pointer;
+  min-width: 100px;
+  transition: background 0.15s ease;
+}
+
+.cmd-slot:hover:not(.disabled) {
+  background: #303050;
+}
+
+.cmd-slot.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+  cursor: default;
+}
+
+.slot-label {
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.slot-value {
+  font-size: 14px;
+  color: #fff;
+  font-weight: bold;
+  margin-top: 2px;
+}
+
+/* Command bar buttons */
+.cmd-send, .cmd-clear {
+  padding: 10px 20px;
+  margin-left: 10px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 12px;
+  text-transform: uppercase;
+  transition: background 0.15s ease;
+}
+
+.cmd-send {
+  background: #4CAF50;
+  color: white;
+}
+
+.cmd-send:hover:not(:disabled) {
+  background: #5CBF60;
+}
+
+.cmd-send:disabled {
+  background: #333;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.cmd-clear {
+  background: #555;
+  color: white;
+}
+
+.cmd-clear:hover {
+  background: #666;
+}
+
+/* Dropdown menus */
+.cmd-dropdown {
+  position: fixed;
+  background: #252540;
+  border: 1px solid #444;
+  border-radius: 4px;
+  z-index: 1000;
+  min-width: 180px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.dropdown-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dropdown-list li {
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid #333;
+  transition: background 0.15s ease;
+}
+
+.dropdown-list li:last-child {
+  border-bottom: none;
+}
+
+.dropdown-list li:hover {
+  background: #303050;
+}
+
+/* Quick heading buttons */
+.heading-quick-row {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid #333;
+}
+
+.heading-quick-btn {
+  flex: 1;
+  padding: 12px 8px;
+  background: #303050;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.heading-quick-btn:hover {
+  background: #404070;
+  border-color: #4CAF50;
+}
+
+/* Parameter input in dropdown */
+.param-input {
+  padding: 12px;
+}
+
+.param-input label {
+  display: block;
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 6px;
+}
+
+.param-input input {
+  width: 100px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: #1a1a2e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 14px;
+}
+
+.param-input input:focus {
+  outline: none;
+  border-color: #4CAF50;
+}
+
+.param-ok {
+  padding: 8px 16px;
+  background: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+.param-ok:hover {
+  background: #5CBF60;
+}
+
+/* Utility classes */
+.hidden {
+  display: none !important;
+}
+
+/* Start screen */
+#start-screen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #0a0a14;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+}
+
+/* Other UI panels (stubs for future phases) */
+#comms-log,
+#outbox-panel,
+#subtitles,
+#advisor,
+#time-controls {
+  display: none; /* Hidden for Phase 2 */
+}
+
+/* Leaflet customization */
+.leaflet-container {
+  background: #1a1a2e;
+}
+
+.leaflet-control-zoom {
+  border: none !important;
+}
+
+.leaflet-control-zoom a {
+  background: #252540 !important;
+  color: #fff !important;
+  border: none !important;
+}
+
+.leaflet-control-zoom a:hover {
+  background: #303050 !important;
+}
+
+.leaflet-control-attribution {
+  background: rgba(26, 26, 46, 0.8) !important;
+  color: #666 !important;
+  font-size: 10px;
+}
+
+.leaflet-control-attribution a {
+  color: #888 !important;
+}

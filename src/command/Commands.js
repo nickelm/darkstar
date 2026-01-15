@@ -84,13 +84,48 @@ export const COMMANDS = {
 
 export class Command {
   constructor(callsign, commandType, params = {}) {
-    this.id = null;
+    this.id = Date.now() + Math.random();
     this.callsign = callsign;
     this.type = commandType;
     this.params = params;
     this.timestamp = null;
   }
 
-  toString() {}          // "Viper 1-1, snap 270"
-  validate() {}
+  toString() {
+    let str = `${this.callsign}, ${this.type}`;
+
+    if (this.params.heading !== undefined) {
+      str += ` ${this.params.heading.toString().padStart(3, '0')}`;
+    }
+    if (this.params.altitude !== undefined) {
+      str += ` ${Math.round(this.params.altitude / 1000)}`;
+    }
+    if (this.params.target !== undefined) {
+      str += ` ${this.params.target}`;
+    }
+
+    return str;
+  }
+
+  validate() {
+    const def = COMMANDS[this.type];
+    if (!def) return { valid: false, error: 'Unknown command type' };
+
+    // Check required parameters
+    for (const param of def.params) {
+      if (this.params[param] === undefined) {
+        return { valid: false, error: `Missing parameter: ${param}` };
+      }
+    }
+
+    // Type-specific validation
+    if (this.type === 'SNAP' || this.type === 'VECTOR') {
+      const h = this.params.heading;
+      if (h < 0 || h > 360) {
+        return { valid: false, error: 'Heading must be 0-360' };
+      }
+    }
+
+    return { valid: true };
+  }
 }

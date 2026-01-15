@@ -1,5 +1,6 @@
 import { PIDController } from '../util/pid.js';
-import { getVelocity, braa } from '../util/math.js';
+import { getVelocity, kts2ms, wrapDeg } from '../util/math.js';
+import { AIRCRAFT } from '../data/aircraft.js';
 
 export class Aircraft {
   constructor(config) {
@@ -7,45 +8,192 @@ export class Aircraft {
     this.callsign = config.callsign;
     this.type = config.type;         // 'F-15C', 'MiG-29', etc.
     this.side = config.side;         // 'blue', 'red'
-    
+
     // State
     this.position = { x: 0, y: 0 };  // Local meters
     this.altitude = 0;                // Feet
     this.heading = 0;
     this.speed = 0;                   // Knots
     this.fuel = 100;                  // Percentage
-    
+
+    // Target values (set by commands)
+    this.targetHeading = 0;
+    this.targetAltitude = 0;
+    this.targetSpeed = 0;
+
     // Weapons
     this.weapons = [];
-    
+
     // Control
     this.headingPID = null;
     this.altitudePID = null;
     this.speedPID = null;
-    
+
     // AI state
     this.aiState = 'idle';
     this.currentCommand = null;
     this.target = null;
-    
+
     // Flight membership
     this.flight = null;
     this.isLead = false;
+    this.formationIndex = 0;  // Position in formation (0 = lead)
+
+    // AI controller (PilotAI or EnemyAI)
+    this.ai = null;
+
+    // Reference to GeoReference (set by Simulation)
+    this.geoRef = null;
+
+    // Aircraft performance data
+    this.performance = AIRCRAFT[this.type] || AIRCRAFT['F-16C'] || {};
   }
 
-  init() {}              // Initialize PID controllers
-  update(delta) {}       // Update physics, consume fuel
-  
-  setHeading(heading) {}
-  setAltitude(altitude) {}
-  setSpeed(speed) {}
-  
-  getPosition() {}       // Returns { lat, lon }
-  getVelocity() {}       // Returns velocity vector
-  
-  launchWeapon(type, target) {}
-  
-  isAlive() {}
-  isBingoFuel() {}
-  isWinchester() {}
+  init() {
+    // Initialize PID controllers with tuned parameters
+    // Heading: Kp=2.0, Ki=0.1, Kd=0.5, maxOutput=6.0 deg/s, maxChange=2.0
+    this.headingPID = new PIDController(2.0, 0.1, 0.5, 6.0, 2.0);
+
+    // Set initial targets to current values
+    this.targetHeading = this.heading;
+    this.targetAltitude = this.altitude;
+    this.targetSpeed = this.speed;
+  }
+
+  update(delta) {
+    // 0. Let AI controller update targets (if present)
+    if (this.ai) {
+      this.ai.update(delta);
+    }
+
+    // 0.5 Wingman formation following (only if not lead and in idle/vectoring state)
+    if (!this.isLead && this.flight && this.flight.lead && this.shouldFollowFormation()) {
+      this.updateFormationFollow(delta);
+    }
+
+    // 1. Update heading via PID
+    this.headingPID.setTarget(this.targetHeading);
+    const turnRate = this.headingPID.update(delta, this.heading);
+    this.heading = wrapDeg(this.heading + turnRate * delta);
+
+    // 2. Update altitude (simplified - move toward target at fixed rate)
+    const altDiff = this.targetAltitude - this.altitude;
+    const maxClimb = 2000 * delta / 60; // 2000 ft/min
+    if (Math.abs(altDiff) > maxClimb) {
+      this.altitude += Math.sign(altDiff) * maxClimb;
+    } else {
+      this.altitude = this.targetAltitude;
+    }
+
+    // 3. Update speed (simplified - move toward target)
+    const speedDiff = this.targetSpeed - this.speed;
+    const maxAccel = 20 * delta; // 20 kts/s
+    if (Math.abs(speedDiff) > maxAccel) {
+      this.speed += Math.sign(speedDiff) * maxAccel;
+    } else {
+      this.speed = this.targetSpeed;
+    }
+
+    // 4. Calculate velocity and update position
+    const speedMs = kts2ms(this.speed);
+    const velocity = getVelocity(this.heading, 0, speedMs);
+
+    this.position.x += velocity.x * delta;
+    this.position.y += velocity.y * delta;
+
+    // 5. Consume fuel (basic model)
+    const cruiseSpeed = this.performance.speed?.cruise || 450;
+    const fuelMultiplier = Math.pow(this.speed / cruiseSpeed, 2);
+    const baseBurnRate = 100 / (2 * 60 * 60); // 100% over 2 hours
+    this.fuel -= baseBurnRate * fuelMultiplier * delta;
+    this.fuel = Math.max(0, this.fuel);
+  }
+
+  /**
+   * Check if aircraft should follow formation (not engaged in combat)
+   */
+  shouldFollowFormation() {
+    // Follow formation when idle, vectoring, or in patrol
+    const formationStates = ['idle', 'vectoring', 'patrol'];
+    return formationStates.includes(this.aiState);
+  }
+
+  /**
+   * Update heading/speed to maintain formation position relative to lead
+   */
+  updateFormationFollow(delta) {
+    const lead = this.flight.lead;
+    const offset = this.flight.getFormationOffset(this.formationIndex);
+
+    // Calculate desired world position based on lead's position and heading
+    const leadHeadingRad = lead.heading * Math.PI / 180;
+
+    // Rotate offset by lead's heading (offset.y is behind, offset.x is right)
+    const desiredX = lead.position.x
+      + offset.x * Math.cos(leadHeadingRad)
+      - offset.y * Math.sin(leadHeadingRad);
+    const desiredY = lead.position.y
+      + offset.x * Math.sin(leadHeadingRad)
+      + offset.y * Math.cos(leadHeadingRad);
+
+    // Calculate delta to desired position
+    const dx = desiredX - this.position.x;
+    const dy = desiredY - this.position.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    // If close enough to formation position, match lead's heading and speed
+    if (distance < 100) {
+      this.targetHeading = lead.targetHeading;
+      this.targetSpeed = lead.targetSpeed;
+      this.targetAltitude = lead.targetAltitude;
+    } else {
+      // Steer toward formation position
+      const headingToPosition = Math.atan2(dx, dy) * 180 / Math.PI;
+      this.targetHeading = wrapDeg(headingToPosition);
+
+      // Adjust speed based on distance (speed up if falling behind)
+      const speedAdjust = Math.min(distance / 500, 0.3); // Up to 30% faster
+      this.targetSpeed = lead.speed * (1 + speedAdjust);
+      this.targetAltitude = lead.targetAltitude;
+    }
+  }
+
+  setHeading(heading) {
+    this.targetHeading = wrapDeg(heading);
+  }
+
+  setAltitude(altitude) {
+    this.targetAltitude = altitude;
+  }
+
+  setSpeed(speed) {
+    const maxSpeed = this.performance.speed?.max || 1000;
+    this.targetSpeed = Math.min(speed, maxSpeed);
+  }
+
+  getPosition() {
+    if (!this.geoRef) return { lat: 0, lon: 0 };
+    return this.geoRef.toGeo(this.position.x, this.position.y);
+  }
+
+  getVelocityVector() {
+    const speedMs = kts2ms(this.speed);
+    return getVelocity(this.heading, 0, speedMs);
+  }
+
+  launchWeapon(type, target) {
+    // Future implementation
+  }
+
+  isAlive() {
+    return this.fuel > 0;
+  }
+
+  isBingoFuel() {
+    return this.fuel < 20;
+  }
+
+  isWinchester() {
+    return this.weapons.length === 0;
+  }
 }
