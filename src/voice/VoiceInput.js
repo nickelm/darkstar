@@ -18,6 +18,7 @@ export class VoiceInput {
 
     // Callbacks
     this.onResult = null;        // (text) => void - called with final transcript
+    this.onInterimResult = null; // (text) => void - called with interim (non-final) transcript
     this.onError = null;         // (error) => void
     this.onStateChange = null;   // (state) => void
 
@@ -231,9 +232,14 @@ export class VoiceInput {
 
     // Get the latest result
     const result = results[results.length - 1];
+    const transcript = result[0].transcript.trim();
+
+    // For non-final results, call interim callback
+    if (!result.isFinal && transcript && this.onInterimResult) {
+      this.onInterimResult(transcript);
+    }
 
     if (result.isFinal) {
-      const transcript = result[0].transcript.trim();
       const confidence = result[0].confidence;
       console.log('VoiceInput: Final transcript:', JSON.stringify(transcript),
         '| confidence:', confidence ? confidence.toFixed(3) : 'N/A');

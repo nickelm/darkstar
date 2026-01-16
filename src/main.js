@@ -107,13 +107,24 @@ class Darkstar {
     this.voiceInput.onResult = (text) => {
       console.log('Voice input:', text);
       const commands = this.commandParser.parse(text);
-      for (const cmd of commands) {
-        this.outbox.add(cmd, true); // immediate execution for voice
+
+      if (commands.length === 0) {
+        // No valid commands parsed - show error feedback
+        console.log('Voice input: No commands parsed from:', text);
+        this.commandBar.showParseError();
+      } else {
+        for (const cmd of commands) {
+          this.outbox.add(cmd, true); // immediate execution for voice
+        }
       }
+
+      // Clear interim transcript after processing
+      this.commandBar.hideInterimTranscript();
     };
 
-    // Wire up command bar to voice input
+    // Wire up command bar to voice input and parser
     this.commandBar.setVoiceInput(this.voiceInput);
+    this.commandBar.setCommandParser(this.commandParser);
 
     // Wire up map view to track databox
     this.mapView.setTrackDatabox(this.trackDatabox);
@@ -298,13 +309,14 @@ class Darkstar {
     // Clicking friendly: select callsign
     // Clicking hostile when ENGAGE selected: select target
     this.mapView.onTrackClick = (aircraft) => {
-      if (aircraft.side === 'red' && this.commandBar.selectedCommand === 'ENGAGE') {
-        // Fill target slot with clicked hostile's flight callsign
-        if (aircraft.flight) {
+      if (aircraft.side === 'red') {
+        // Hostile aircraft - only allow selecting as target when ENGAGE is active
+        if (this.commandBar.selectedCommand === 'ENGAGE' && aircraft.flight) {
           this.commandBar.setParam('target', aircraft.flight.callsign);
         }
+        // Otherwise ignore clicks on hostile aircraft
       } else if (aircraft.flight) {
-        // Select friendly flight
+        // Friendly aircraft - select as callsign
         this.commandBar.selectCallsign(aircraft.flight.callsign);
       }
     };

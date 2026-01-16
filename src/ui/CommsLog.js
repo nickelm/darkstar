@@ -1,8 +1,9 @@
 /**
  * CommsLog - Communications log panel
  *
- * Displays radio traffic in a scrolling log with timestamps,
- * color coding, and filtering capabilities.
+ * Displays radio traffic at the bottom of the screen with:
+ * - Collapsed mode: single line showing most recent message
+ * - Expanded mode: vertical scroll history growing upward
  */
 export class CommsLog {
   constructor(container) {
@@ -12,8 +13,11 @@ export class CommsLog {
     this.maxEntries = 100;
 
     // DOM elements
+    this.collapsedView = null;
+    this.expandedView = null;
     this.logElement = null;
     this.filterElement = null;
+    this.latestMessageEl = null;
 
     // Entry ID counter
     this.nextId = 1;
@@ -23,6 +27,9 @@ export class CommsLog {
 
     // Available flights (for filter dropdown)
     this.availableFlights = [];
+
+    // Expanded state
+    this.isExpanded = false;
 
     this.initialized = false;
   }
@@ -43,27 +50,94 @@ export class CommsLog {
    */
   render() {
     this.container.innerHTML = `
-      <div class="comms-log-header">
-        <span class="comms-log-title">COMMS</span>
-        <select class="comms-log-filter">
-          <option value="all">ALL</option>
-          <option value="strike">STRIKE</option>
-          <option value="guard">GUARD</option>
-        </select>
+      <div class="comms-collapsed-view">
+        <button class="comms-filter-btn" title="Filter messages">
+          <span class="filter-icon">☰</span>
+          <span class="filter-label">ALL</span>
+        </button>
+        <div class="comms-latest-message">
+          <span class="latest-text">No messages</span>
+        </div>
+        <button class="comms-expand-btn" title="Expand comms log">▲</button>
       </div>
-      <div class="comms-log-entries"></div>
+      <div class="comms-expanded-view hidden">
+        <div class="comms-expanded-header">
+          <span class="comms-log-title">COMMUNICATIONS LOG</span>
+          <select class="comms-log-filter">
+            <option value="all">ALL</option>
+            <option value="strike">STRIKE</option>
+            <option value="guard">GUARD</option>
+          </select>
+          <button class="comms-clear-btn" title="Clear log">Clear</button>
+          <button class="comms-collapse-btn" title="Collapse">▼</button>
+        </div>
+        <div class="comms-log-entries"></div>
+      </div>
+      <div class="comms-filter-dropdown hidden">
+        <button class="filter-option" data-filter="all">ALL</button>
+        <button class="filter-option" data-filter="strike">STRIKE</button>
+        <button class="filter-option" data-filter="guard">GUARD</button>
+      </div>
     `;
 
+    // Cache elements
+    this.collapsedView = this.container.querySelector('.comms-collapsed-view');
+    this.expandedView = this.container.querySelector('.comms-expanded-view');
     this.logElement = this.container.querySelector('.comms-log-entries');
     this.filterElement = this.container.querySelector('.comms-log-filter');
+    this.latestMessageEl = this.container.querySelector('.latest-text');
+    this.filterBtn = this.container.querySelector('.comms-filter-btn');
+    this.filterLabel = this.container.querySelector('.filter-label');
+    this.filterDropdown = this.container.querySelector('.comms-filter-dropdown');
+    this.expandBtn = this.container.querySelector('.comms-expand-btn');
+    this.collapseBtn = this.container.querySelector('.comms-collapse-btn');
+    this.clearBtn = this.container.querySelector('.comms-clear-btn');
   }
 
   /**
    * Bind event listeners
    */
   bindEvents() {
+    // Expand button
+    this.expandBtn.addEventListener('click', () => {
+      this.expand();
+    });
+
+    // Collapse button
+    this.collapseBtn.addEventListener('click', () => {
+      this.collapse();
+    });
+
+    // Filter button (collapsed view)
+    this.filterBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleFilterDropdown();
+    });
+
+    // Filter dropdown options
+    this.filterDropdown.querySelectorAll('.filter-option').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const filter = e.target.dataset.filter;
+        this.setFilter(filter);
+        this.hideFilterDropdown();
+      });
+    });
+
+    // Filter select (expanded view)
     this.filterElement.addEventListener('change', (e) => {
       this.setFilter(e.target.value);
+    });
+
+    // Clear button
+    this.clearBtn.addEventListener('click', () => {
+      this.clear();
+    });
+
+    // Click outside filter dropdown closes it
+    document.addEventListener('click', (e) => {
+      if (!this.filterDropdown.contains(e.target) && !this.filterBtn.contains(e.target)) {
+        this.hideFilterDropdown();
+      }
     });
 
     // Pause auto-scroll when user scrolls up
@@ -71,6 +145,47 @@ export class CommsLog {
       const { scrollTop, scrollHeight, clientHeight } = this.logElement;
       this.autoScroll = scrollTop + clientHeight >= scrollHeight - 10;
     });
+
+    // Click on collapsed latest message expands
+    this.container.querySelector('.comms-latest-message').addEventListener('click', () => {
+      this.expand();
+    });
+  }
+
+  /**
+   * Expand the comms log
+   */
+  expand() {
+    this.isExpanded = true;
+    this.container.classList.add('expanded');
+    this.collapsedView.classList.add('hidden');
+    this.expandedView.classList.remove('hidden');
+    this.hideFilterDropdown();
+    this.scrollToBottom();
+  }
+
+  /**
+   * Collapse the comms log
+   */
+  collapse() {
+    this.isExpanded = false;
+    this.container.classList.remove('expanded');
+    this.collapsedView.classList.remove('hidden');
+    this.expandedView.classList.add('hidden');
+  }
+
+  /**
+   * Toggle filter dropdown
+   */
+  toggleFilterDropdown() {
+    this.filterDropdown.classList.toggle('hidden');
+  }
+
+  /**
+   * Hide filter dropdown
+   */
+  hideFilterDropdown() {
+    this.filterDropdown.classList.add('hidden');
   }
 
   /**
@@ -89,7 +204,7 @@ export class CommsLog {
     // Keep current value
     const currentValue = this.filterElement.value;
 
-    // Rebuild options
+    // Rebuild options for expanded view select
     let options = `
       <option value="all">ALL</option>
       <option value="strike">STRIKE</option>
@@ -106,6 +221,28 @@ export class CommsLog {
     if (this.filterElement.querySelector(`option[value="${currentValue}"]`)) {
       this.filterElement.value = currentValue;
     }
+
+    // Update collapsed filter dropdown
+    let dropdownHtml = `
+      <button class="filter-option" data-filter="all">ALL</button>
+      <button class="filter-option" data-filter="strike">STRIKE</button>
+      <button class="filter-option" data-filter="guard">GUARD</button>
+    `;
+
+    for (const flight of this.availableFlights) {
+      dropdownHtml += `<button class="filter-option" data-filter="${flight}">${flight}</button>`;
+    }
+
+    this.filterDropdown.innerHTML = dropdownHtml;
+
+    // Rebind click events
+    this.filterDropdown.querySelectorAll('.filter-option').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const filter = e.target.dataset.filter;
+        this.setFilter(filter);
+        this.hideFilterDropdown();
+      });
+    });
   }
 
   /**
@@ -130,10 +267,26 @@ export class CommsLog {
       this.entries.shift();
     }
 
+    // Update latest message display
+    this.updateLatestMessage(logEntry);
+
     // Render if matches current filter
     if (this.matchesFilter(logEntry)) {
       this.renderEntry(logEntry);
     }
+  }
+
+  /**
+   * Update the collapsed view's latest message
+   * @param {Object} entry
+   */
+  updateLatestMessage(entry) {
+    const timeStr = this.formatTime(entry.time);
+    const text = `[${timeStr}] ${entry.speaker}: ${entry.message}`;
+    this.latestMessageEl.textContent = text;
+
+    // Add priority class for color coding
+    this.latestMessageEl.className = `latest-text priority-${entry.priority}`;
   }
 
   /**
@@ -155,6 +308,8 @@ export class CommsLog {
    */
   setFilter(filter) {
     this.filter = filter;
+    this.filterLabel.textContent = filter.toUpperCase();
+    this.filterElement.value = filter;
     this.renderAllEntries();
   }
 
@@ -222,6 +377,8 @@ export class CommsLog {
   clear() {
     this.entries = [];
     this.logElement.innerHTML = '';
+    this.latestMessageEl.textContent = 'No messages';
+    this.latestMessageEl.className = 'latest-text';
   }
 
   /**

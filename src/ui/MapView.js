@@ -402,6 +402,9 @@ export class MapView {
     }
 
     if (foundTrack) {
+      // Change cursor to pointer when over a track
+      this.container.style.cursor = 'pointer';
+
       if (this.hoveredTrackId !== foundTrack.id) {
         this.hoveredTrackId = foundTrack.id;
 
@@ -409,8 +412,13 @@ export class MapView {
           this.onTrackHoverCallback(foundTrack.aircraft);
         }
       }
-    } else if (this.hoveredTrackId) {
-      this.hoveredTrackId = null;
+    } else {
+      // Reset cursor when not over a track
+      this.container.style.cursor = '';
+
+      if (this.hoveredTrackId) {
+        this.hoveredTrackId = null;
+      }
     }
   }
 
@@ -419,6 +427,7 @@ export class MapView {
    */
   clearHover() {
     this.hoveredTrackId = null;
+    this.container.style.cursor = '';
   }
 
   /**

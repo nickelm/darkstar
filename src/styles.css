@@ -31,7 +31,7 @@ html, body {
   top: 0;
   left: 0;
   right: 200px;
-  bottom: 60px;
+  bottom: 90px; /* Above comms log (30px) + command bar (60px) */
   background: #1a1a2e;
   touch-action: none;
 }
@@ -60,6 +60,64 @@ html, body {
   scrollbar-width: none;
   /* Hide scrollbar - IE/Edge */
   -ms-overflow-style: none;
+  transition: background 0.15s ease;
+}
+
+#command-bar.parse-error {
+  background: #3a1a1a;
+  animation: cmd-error-flash 0.3s ease;
+}
+
+@keyframes cmd-error-flash {
+  0% { background: #3a1a1a; }
+  50% { background: #5a2020; }
+  100% { background: #3a1a1a; }
+}
+
+/* Interim transcript display (above command bar) */
+.cmd-interim-transcript {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: rgba(26, 26, 46, 0.95);
+  border-top: 1px solid #444;
+  padding: 8px 15px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 14px;
+  font-style: italic;
+  color: #888;
+  z-index: 100;
+}
+
+.cmd-interim-transcript.hidden {
+  display: none;
+}
+
+.interim-text {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Parse highlighting in interim text */
+.interim-callsign {
+  color: #00BFFF;
+  font-weight: bold;
+  font-style: normal;
+}
+
+.interim-command {
+  color: #4CAF50;
+  font-weight: bold;
+  font-style: normal;
+}
+
+.interim-param {
+  color: #fff;
+  font-weight: bold;
+  font-style: normal;
 }
 
 /* Hide scrollbar - Chrome/Safari/Opera */
@@ -390,26 +448,137 @@ html, body {
   to { transform: rotate(360deg); }
 }
 
-/* Communications Log Panel - Now hidden, replaced by track panel */
+/* Communications Log Panel - Bottom bar above command bar */
 #comms-log {
+  position: absolute;
+  bottom: 60px;
+  left: 0;
+  right: 200px;
+  height: 30px;
+  background: #1a1a2e;
+  border-top: 1px solid #333;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  transition: height 0.3s ease;
+}
+
+#comms-log.expanded {
+  height: 200px;
+}
+
+/* Collapsed view - single line */
+.comms-collapsed-view {
+  display: flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 10px;
+  gap: 10px;
+}
+
+.comms-collapsed-view.hidden {
   display: none;
 }
 
-.comms-log-header {
+.comms-filter-btn {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 10px;
-  border-bottom: 1px solid #333;
+  gap: 4px;
   background: #252540;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #888;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.comms-filter-btn:hover {
+  background: #303050;
+  color: #fff;
+}
+
+.filter-icon {
+  font-size: 12px;
+}
+
+.filter-label {
+  text-transform: uppercase;
+}
+
+.comms-latest-message {
+  flex: 1;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.latest-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  color: #aaa;
+}
+
+.latest-text.priority-normal {
+  color: #ccc;
+}
+
+.latest-text.priority-warning {
+  color: #ffcc00;
+}
+
+.latest-text.priority-threat {
+  color: #ff4444;
+}
+
+.comms-expand-btn {
+  background: #252540;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #888;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.comms-expand-btn:hover {
+  background: #303050;
+  color: #fff;
+}
+
+/* Expanded view */
+.comms-expanded-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.comms-expanded-view.hidden {
+  display: none;
+}
+
+.comms-expanded-header {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  gap: 10px;
+  background: #252540;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
 }
 
 .comms-log-title {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: bold;
   color: #888;
   text-transform: uppercase;
   letter-spacing: 1px;
+  flex: 1;
 }
 
 .comms-log-filter {
@@ -425,6 +594,36 @@ html, body {
 .comms-log-filter:focus {
   outline: none;
   border-color: #4CAF50;
+}
+
+.comms-clear-btn {
+  background: #333;
+  border: none;
+  color: #888;
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.comms-clear-btn:hover {
+  background: #444;
+  color: #fff;
+}
+
+.comms-collapse-btn {
+  background: #252540;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #888;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.comms-collapse-btn:hover {
+  background: #303050;
+  color: #fff;
 }
 
 .comms-log-entries {
@@ -476,15 +675,54 @@ html, body {
   color: inherit;
 }
 
+/* Filter dropdown (collapsed view) */
+.comms-filter-dropdown {
+  position: absolute;
+  bottom: 35px;
+  left: 10px;
+  background: #252540;
+  border: 1px solid #444;
+  border-radius: 4px;
+  z-index: 300;
+  min-width: 100px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.comms-filter-dropdown.hidden {
+  display: none;
+}
+
+.filter-option {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid #333;
+  color: #ccc;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.filter-option:last-child {
+  border-bottom: none;
+}
+
+.filter-option:hover {
+  background: #303050;
+  color: #fff;
+}
+
 /* Subtitles overlay */
 #subtitles {
   position: absolute;
   top: 0;
   left: 0;
   right: 200px;
-  bottom: 60px;
+  bottom: 90px; /* Above comms log (30px) + command bar (60px) */
   pointer-events: none;
-  z-index: 200;
+  z-index: 475;
 }
 
 .subtitle {
@@ -826,79 +1064,126 @@ html, body {
   color: #fff;
 }
 
-/* Track Panel (sidebar) */
+/* Floating Track Databoxes Container (overlay on map) */
 #track-databoxes {
   position: absolute;
-  right: 0;
   top: 40px;
-  width: 200px;
-  bottom: 240px; /* Above outbox panel */
-  background: #1a1a2e;
-  border-left: 1px solid #333;
-  display: flex;
-  flex-direction: column;
-  z-index: 100;
+  left: 0;
+  right: 200px;
+  bottom: 90px;
+  pointer-events: none;
+  z-index: 450;
 }
 
-.track-panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 10px;
-  background: #252540;
-  border-bottom: 1px solid #333;
-  cursor: pointer;
+/* SVG for tether lines */
+.tether-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
-.track-panel-title {
-  font-size: 11px;
-  font-weight: bold;
-  color: #888;
-  text-transform: uppercase;
-  letter-spacing: 1px;
+.tether-line {
+  stroke: rgba(100, 100, 120, 0.6);
+  stroke-width: 1;
+  stroke-dasharray: 4 2;
 }
 
-.track-panel-toggle {
-  background: none;
-  border: none;
-  color: #888;
-  font-size: 10px;
-  cursor: pointer;
-  padding: 2px 5px;
-}
-
-.track-panel-toggle:hover {
-  color: #fff;
-}
-
-.track-panel-entries {
-  flex: 1;
-  overflow-y: auto;
-  padding: 5px;
-}
-
-#track-databoxes.collapsed .track-panel-entries {
+.tether-line.hidden {
   display: none;
 }
 
-.track-databox {
-  background: #252540;
+/* Floating databoxes container */
+.floating-databoxes {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Individual floating databox */
+.floating-databox {
+  position: absolute;
+  background: rgba(37, 37, 64, 0.95);
   border: 1px solid #444;
   border-radius: 4px;
-  margin-bottom: 5px;
+  width: 160px;
+  pointer-events: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
-.track-databox.selected {
+.floating-databox.selected {
   border-color: #00BFFF;
+  box-shadow: 0 0 8px rgba(0, 191, 255, 0.3);
 }
 
-.track-databox.pinned {
+.floating-databox.pinned {
   border-color: #4CAF50;
 }
 
-.track-databox.pinned.selected {
+.floating-databox.pinned.selected {
   border-color: #4CAF50;
-  box-shadow: 0 0 0 1px #00BFFF;
+  box-shadow: 0 0 0 1px #00BFFF, 0 0 8px rgba(76, 175, 80, 0.3);
+}
+
+.floating-databox.dragging {
+  opacity: 0.8;
+  cursor: grabbing;
+}
+
+/* Edge indicators container */
+.edge-indicators {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Edge indicator (off-screen track pointer) */
+.edge-indicator {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: rgba(26, 26, 46, 0.9);
+  border: 1px solid #444;
+  border-radius: 4px;
+  pointer-events: auto;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+}
+
+.edge-indicator.hidden {
+  display: none;
+}
+
+.edge-indicator:hover {
+  background: #303050;
+  border-color: #666;
+}
+
+.edge-arrow {
+  font-size: 12px;
+  display: inline-block;
+}
+
+.edge-arrow.friendly {
+  color: #00BFFF;
+}
+
+.edge-arrow.hostile {
+  color: #FF4444;
+}
+
+.edge-callsign {
+  font-size: 10px;
+  color: #ccc;
+  white-space: nowrap;
 }
 
 .databox-header {

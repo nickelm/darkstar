@@ -89,6 +89,16 @@ export class Outbox {
       this.commsLog.logGciCommand(command.callsign, gciMessage);
     }
 
+    // Speak GCI command (only for non-voice commands, i.e., from command bar)
+    // Voice commands are immediate=true, command bar commands are immediate=false
+    const shouldSpeakGci = !entry.immediate && this.voiceOutput && gciMessage;
+    const skipVoice = this.subtitles ? this.subtitles.shouldSkipVoice() : false;
+    if (shouldSpeakGci && !skipVoice) {
+      // Format the full GCI transmission: "[Callsign], [command]"
+      const gciTransmission = `${command.callsign}, ${gciMessage}`;
+      this.voiceOutput.speakAsGCI(gciTransmission);
+    }
+
     // Execute the command
     const success = this.executor.execute(command);
 
@@ -107,8 +117,9 @@ export class Outbox {
         this.subtitles.show(pilotCallsign, ackMessage);
       }
 
-      // Speak acknowledgment
-      if (this.voiceOutput) {
+      // Speak acknowledgment (skip at high time scale)
+      const shouldSpeak = this.subtitles ? !this.subtitles.shouldSkipVoice() : true;
+      if (this.voiceOutput && shouldSpeak) {
         this.voiceOutput.speakAsPilot(pilotCallsign, ackMessage);
       }
     }

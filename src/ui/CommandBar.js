@@ -21,8 +21,18 @@ export class CommandBar {
     // Voice input reference (set by main.js)
     this.voiceInput = null;
 
+    // Command parser reference (set by main.js)
+    this.commandParser = null;
+
     // PTT state
     this.pttState = 'idle';  // 'idle', 'listening', 'processing', 'aborted'
+
+    // Interim transcript state
+    this.interimText = '';
+    this.showInterim = false;
+
+    // Error flash timeout
+    this.errorFlashTimeout = null;
   }
 
   init() {
@@ -33,6 +43,9 @@ export class CommandBar {
 
   render() {
     this.container.innerHTML = `
+      <div class="cmd-interim-transcript hidden">
+        <span class="interim-text"></span>
+      </div>
       <div class="time-controls-container"></div>
       <button class="cmd-ptt" title="Push to Talk (\`)">
         <span class="ptt-icon"></span>
@@ -57,6 +70,8 @@ export class CommandBar {
 
     // Cache element references
     this.elements.timeControlsContainer = this.container.querySelector('.time-controls-container');
+    this.elements.interimTranscript = this.container.querySelector('.cmd-interim-transcript');
+    this.elements.interimText = this.container.querySelector('.interim-text');
     this.elements.pttBtn = this.container.querySelector('.cmd-ptt');
     this.elements.pttIcon = this.container.querySelector('.ptt-icon');
     this.elements.pttStatus = this.container.querySelector('.ptt-status');
@@ -286,8 +301,8 @@ export class CommandBar {
       { ...this.selectedParams }
     );
 
-    // Add to outbox (execute immediately for Phase 2)
-    this.outbox.add(command, true); // immediate = true
+    // Add to outbox with 3-second hold (voice commands bypass this)
+    this.outbox.add(command, false); // immediate = false for command bar
 
     // Reset state
     this.clear();
@@ -385,8 +400,110 @@ export class CommandBar {
       // Wire up state change callback
       this.voiceInput.onStateChange = (state) => {
         this.setPttState(state);
+
+        // Clear interim on state change to idle or aborted
+        if (state === 'idle' || state === 'aborted') {
+          this.hideInterimTranscript();
+        }
+      };
+
+      // Wire up interim result callback for live feedback
+      this.voiceInput.onInterimResult = (text) => {
+        this.showInterimTranscript(text);
       };
     }
+  }
+
+  /**
+   * Set command parser reference for interim parsing
+   * @param {CommandParser} parser
+   */
+  setCommandParser(parser) {
+    this.commandParser = parser;
+  }
+
+  /**
+   * Show interim transcript with parse highlighting
+   * @param {string} text
+   */
+  showInterimTranscript(text) {
+    if (!this.elements.interimTranscript) return;
+
+    this.interimText = text;
+    this.showInterim = true;
+
+    // Parse the interim text for highlighting
+    let displayHtml = text;
+
+    if (this.commandParser) {
+      const parsed = this.commandParser.tryParse(text);
+
+      // Build highlighted version
+      let highlighted = text;
+
+      // Highlight callsign
+      if (parsed.callsign) {
+        const pattern = new RegExp(`(${parsed.callsign.replace(/[- ]/g, '[- ]?')})`, 'i');
+        highlighted = highlighted.replace(pattern, '<span class="interim-callsign">$1</span>');
+      }
+
+      // Highlight command
+      if (parsed.command) {
+        const cmdText = parsed.command.replace(/_/g, ' ');
+        const pattern = new RegExp(`(${cmdText})`, 'i');
+        highlighted = highlighted.replace(pattern, '<span class="interim-command">$1</span>');
+      }
+
+      // Highlight params
+      if (parsed.params.heading !== undefined) {
+        const pattern = new RegExp(`\\b(${parsed.params.heading})\\b`);
+        highlighted = highlighted.replace(pattern, '<span class="interim-param">$1</span>');
+      }
+      if (parsed.params.altitude !== undefined) {
+        const angels = Math.round(parsed.params.altitude / 1000);
+        const pattern = new RegExp(`\\b(${angels})\\b`);
+        highlighted = highlighted.replace(pattern, '<span class="interim-param">$1</span>');
+      }
+      if (parsed.params.target) {
+        const pattern = new RegExp(`(${parsed.params.target.replace(/[- ]/g, '[- ]?')})`, 'i');
+        highlighted = highlighted.replace(pattern, '<span class="interim-param">$1</span>');
+      }
+
+      displayHtml = highlighted;
+    }
+
+    this.elements.interimText.innerHTML = displayHtml;
+    this.elements.interimTranscript.classList.remove('hidden');
+  }
+
+  /**
+   * Hide interim transcript
+   */
+  hideInterimTranscript() {
+    if (!this.elements.interimTranscript) return;
+
+    this.interimText = '';
+    this.showInterim = false;
+    this.elements.interimTranscript.classList.add('hidden');
+    this.elements.interimText.innerHTML = '';
+  }
+
+  /**
+   * Show parse error feedback
+   */
+  showParseError() {
+    // Clear any existing timeout
+    if (this.errorFlashTimeout) {
+      clearTimeout(this.errorFlashTimeout);
+    }
+
+    // Add error class to command bar
+    this.container.classList.add('parse-error');
+
+    // Remove after animation
+    this.errorFlashTimeout = setTimeout(() => {
+      this.container.classList.remove('parse-error');
+    }, 500);
   }
 
   /**

@@ -198,4 +198,64 @@ export class CommandParser {
     // Future LLM fallback
     return null;
   }
+
+  /**
+   * Try to parse input and return partial results for live preview
+   * Does not throw errors, returns what could be parsed
+   * @param {string} input
+   * @returns {Object} { callsign, command, params, unparsed, success }
+   */
+  tryParse(input) {
+    if (!input || !input.trim()) {
+      return { callsign: null, command: null, params: {}, unparsed: '', success: false };
+    }
+
+    const normalized = input.trim().toUpperCase();
+
+    // Try to extract callsign
+    const callsign = this.extractCallsign(normalized);
+
+    // Try to extract command
+    const command = this.extractCommand(normalized);
+
+    // Try to extract params
+    const params = {};
+    if (command === 'SNAP' || command === 'VECTOR') {
+      const heading = this.extractHeading(normalized);
+      if (heading !== null) {
+        params.heading = heading;
+      }
+    } else if (command === 'ANGELS') {
+      const altitude = this.extractAltitude(normalized);
+      if (altitude !== null) {
+        params.altitude = altitude;
+      }
+    } else if (command === 'ENGAGE') {
+      const target = this.extractTarget(normalized);
+      if (target !== null) {
+        params.target = target;
+      }
+    }
+
+    // Determine what wasn't parsed
+    let unparsed = normalized;
+    if (callsign) {
+      unparsed = unparsed.replace(new RegExp(callsign.replace(/[- ]/g, '[- ]?'), 'i'), '').trim();
+    }
+    if (command) {
+      const cmdPattern = command.replace(/_/g, '\\s*');
+      unparsed = unparsed.replace(new RegExp(cmdPattern, 'i'), '').trim();
+    }
+    // Remove parsed params
+    for (const val of Object.values(params)) {
+      if (typeof val === 'number') {
+        unparsed = unparsed.replace(new RegExp(`\\b${val}\\b`), '').trim();
+      }
+    }
+
+    // Check if we have a valid command
+    const success = !!(callsign && command);
+
+    return { callsign, command, params, unparsed, success };
+  }
 }

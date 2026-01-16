@@ -3,12 +3,13 @@
  *
  * Shows speaker name and message near the relevant aircraft position.
  * Messages fade after a configurable duration.
+ * Center-bottom subtitles are queued vertically (oldest at top).
  */
 export class Subtitles {
   constructor(container) {
     this.container = container;
     this.activeSubtitles = [];
-    this.duration = 3000;    // ms - how long subtitles stay visible
+    this.duration = 3000;    // ms - how long subtitles stay visible (at 1x speed)
 
     // ID counter
     this.nextId = 1;
@@ -16,8 +17,14 @@ export class Subtitles {
     // Reference to map view for position conversion
     this.mapView = null;
 
-    // Reference to simulation for aircraft lookup
+    // Reference to simulation for aircraft lookup and time scale
     this.simulation = null;
+
+    // Vertical spacing for stacked center-bottom subtitles
+    this.stackSpacing = 40;
+
+    // Base offset from bottom for center subtitles (above comms log)
+    this.baseBottomOffset = 50;
 
     this.initialized = false;
   }
@@ -43,16 +50,25 @@ export class Subtitles {
    * Show a subtitle
    * @param {string} speaker - Speaker callsign
    * @param {string} message - Message text
-   * @param {Object|null} position - Screen position {x, y} or null for default
+   * @param {Object|null} position - Screen position {x, y} or null for auto
    */
   show(speaker, message, position = null) {
+    // Get current time scale for duration adjustment
+    const timeScale = this.simulation?.timeScale || 1;
+
+    // Adjust duration based on time scale (longer at higher speeds since no voice)
+    const adjustedDuration = timeScale > 1 ? this.duration * 1.5 : this.duration;
+
     const subtitle = {
       id: this.nextId++,
       speaker,
       message,
       position,
       createdAt: Date.now(),
-      element: null
+      duration: adjustedDuration,
+      element: null,
+      isTracked: false,  // Will be true if following an aircraft
+      isCenterBottom: false  // Will be true if positioned at center-bottom
     };
 
     // Create DOM element
@@ -68,6 +84,9 @@ export class Subtitles {
     });
 
     this.activeSubtitles.push(subtitle);
+
+    // Reposition all center-bottom subtitles for stacking
+    this.repositionCenterBottomSubtitles();
 
     return subtitle.id;
   }
@@ -99,32 +118,59 @@ export class Subtitles {
       // Use provided position
       subtitle.element.style.left = subtitle.position.x + 'px';
       subtitle.element.style.top = subtitle.position.y + 'px';
+      subtitle.isTracked = false;
+      subtitle.isCenterBottom = false;
     } else if (this.mapView && this.simulation) {
       // Try to position near the speaker's aircraft
       const pos = this.findSpeakerPosition(subtitle.speaker);
       if (pos) {
         subtitle.element.style.left = pos.x + 'px';
         subtitle.element.style.top = pos.y + 'px';
+        subtitle.isTracked = true;
+        subtitle.isCenterBottom = false;
       } else {
         // Default to center-bottom of map
-        this.positionDefault(subtitle);
+        this.positionCenterBottom(subtitle, 0);
+        subtitle.isTracked = false;
+        subtitle.isCenterBottom = true;
       }
     } else {
       // Default position
-      this.positionDefault(subtitle);
+      this.positionCenterBottom(subtitle, 0);
+      subtitle.isTracked = false;
+      subtitle.isCenterBottom = true;
     }
   }
 
   /**
-   * Position subtitle at default location (center-bottom)
+   * Position subtitle at center-bottom with stack offset
    * @param {Object} subtitle
+   * @param {number} stackIndex - Position in stack (0 = bottom/newest)
    */
-  positionDefault(subtitle) {
-    const containerRect = this.container.parentElement.getBoundingClientRect();
+  positionCenterBottom(subtitle, stackIndex) {
+    const containerRect = this.container.getBoundingClientRect();
     subtitle.element.style.left = (containerRect.width / 2) + 'px';
-    subtitle.element.style.bottom = '100px';
+    subtitle.element.style.bottom = (this.baseBottomOffset + stackIndex * this.stackSpacing) + 'px';
     subtitle.element.style.top = 'auto';
     subtitle.element.style.transform = 'translateX(-50%)';
+  }
+
+  /**
+   * Reposition all center-bottom subtitles for proper stacking
+   * Oldest at top, newest at bottom
+   */
+  repositionCenterBottomSubtitles() {
+    const centerBottomSubtitles = this.activeSubtitles.filter(s => s.isCenterBottom);
+
+    // Sort by creation time (oldest first)
+    centerBottomSubtitles.sort((a, b) => a.createdAt - b.createdAt);
+
+    // Position from bottom up (newest at bottom = index 0)
+    centerBottomSubtitles.forEach((subtitle, index) => {
+      // Reverse index so oldest is at top (highest offset)
+      const stackIndex = centerBottomSubtitles.length - 1 - index;
+      this.positionCenterBottom(subtitle, stackIndex);
+    });
   }
 
   /**
@@ -170,17 +216,18 @@ export class Subtitles {
   }
 
   /**
-   * Update subtitles (remove expired)
+   * Update subtitles (remove expired, update positions)
    * @param {number} delta - Time since last frame in seconds
    */
   update(delta) {
     const now = Date.now();
+    let needsReposition = false;
 
     for (let i = this.activeSubtitles.length - 1; i >= 0; i--) {
       const subtitle = this.activeSubtitles[i];
       const age = now - subtitle.createdAt;
 
-      if (age >= this.duration) {
+      if (age >= subtitle.duration) {
         // Start fade out
         subtitle.element.classList.remove('visible');
         subtitle.element.classList.add('fading');
@@ -193,7 +240,11 @@ export class Subtitles {
         }, 300);
 
         this.activeSubtitles.splice(i, 1);
-      } else if (subtitle.position === null && this.mapView && this.simulation) {
+
+        if (subtitle.isCenterBottom) {
+          needsReposition = true;
+        }
+      } else if (subtitle.isTracked && this.mapView && this.simulation) {
         // Update position for moving aircraft
         const pos = this.findSpeakerPosition(subtitle.speaker);
         if (pos) {
@@ -201,6 +252,11 @@ export class Subtitles {
           subtitle.element.style.top = pos.y + 'px';
         }
       }
+    }
+
+    // Reposition center-bottom stack if any were removed
+    if (needsReposition) {
+      this.repositionCenterBottomSubtitles();
     }
   }
 
@@ -245,5 +301,14 @@ export class Subtitles {
    */
   getActiveCount() {
     return this.activeSubtitles.length;
+  }
+
+  /**
+   * Check if we should skip voice and rely on subtitles only
+   * @returns {boolean}
+   */
+  shouldSkipVoice() {
+    const timeScale = this.simulation?.timeScale || 1;
+    return timeScale > 1;
   }
 }
