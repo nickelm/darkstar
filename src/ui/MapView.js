@@ -30,6 +30,12 @@ export class MapView {
     // Combat system reference (set by main.js)
     this.simulation = null;
 
+    // Measurement tool reference (set by main.js)
+    this.measurementTool = null;
+
+    // Cursor info reference (set by main.js)
+    this.cursorInfo = null;
+
     // Track display mode
     this.trackSymbology = settings.get('trackSymbology');
 
@@ -98,6 +104,36 @@ export class MapView {
 
     // Handle mouse leave to clear hover
     this.container.addEventListener('mouseleave', () => this.clearHover());
+
+    // Handle middle mouse button for measurement tool
+    // Use capture phase to intercept before Leaflet's handlers
+    this.container.addEventListener('mousedown', (e) => {
+      if (e.button === 1) { // Middle mouse button
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.measurementTool) {
+          this.measurementTool.startMeasure(e.offsetX, e.offsetY);
+        }
+      }
+    }, true); // capture phase
+
+    this.container.addEventListener('mouseup', (e) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.measurementTool) {
+          this.measurementTool.endMeasure(e.shiftKey);
+        }
+      }
+    }, true); // capture phase
+
+    // Prevent default middle-click scroll/autoscroll behavior
+    this.container.addEventListener('auxclick', (e) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true); // capture phase
   }
 
   resizeCanvas() {
@@ -195,6 +231,11 @@ export class MapView {
       for (const merge of this.simulation.combat.activeMerges) {
         this.drawMerge(merge);
       }
+    }
+
+    // Draw measurement tool overlays
+    if (this.measurementTool) {
+      this.measurementTool.draw(ctx);
     }
   }
 
@@ -643,6 +684,16 @@ export class MapView {
         this.hoveredTrackId = null;
       }
     }
+
+    // Update cursor info display
+    if (this.cursorInfo) {
+      this.cursorInfo.update(event.latlng.lat, event.latlng.lng);
+    }
+
+    // Update measurement tool if measuring
+    if (this.measurementTool) {
+      this.measurementTool.updateMeasure(hoverX, hoverY);
+    }
   }
 
   /**
@@ -667,6 +718,40 @@ export class MapView {
    */
   setSimulation(simulation) {
     this.simulation = simulation;
+  }
+
+  /**
+   * Set the measurement tool reference
+   * @param {MeasurementTool} tool
+   */
+  setMeasurementTool(tool) {
+    this.measurementTool = tool;
+  }
+
+  /**
+   * Set the cursor info reference
+   * @param {CursorInfo} cursorInfo
+   */
+  setCursorInfo(cursorInfo) {
+    this.cursorInfo = cursorInfo;
+  }
+
+  /**
+   * Find a track at the given screen coordinates
+   * @param {number} x - Screen x coordinate
+   * @param {number} y - Screen y coordinate
+   * @returns {Object|null} { id, aircraft } or null if no track found
+   */
+  findTrackAtPoint(x, y) {
+    for (const [id, trackData] of this.tracks) {
+      const pos = trackData.aircraft.getPosition();
+      const point = this.map.latLngToContainerPoint([pos.lat, pos.lon]);
+      const dist = Math.sqrt(Math.pow(x - point.x, 2) + Math.pow(y - point.y, 2));
+      if (dist < 25) {
+        return { id, aircraft: trackData.aircraft };
+      }
+    }
+    return null;
   }
 
   set onTrackClick(callback) {

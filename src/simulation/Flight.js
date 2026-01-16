@@ -11,11 +11,37 @@ export class Flight {
     this.commandHistory = [];
 
     // Combat state
-    this.weaponsAuthorization = 'hold';  // 'hold' | 'free'
+    this.weaponsAuthorization = 'hold';  // 'hold' | 'free' | 'tight'
+    this.autonomous = false;             // BANZAI mode - flight handles own decisions
+
+    // Target sorting mode: 'AZIMUTH' | 'LEAD_TRAIL' | 'ASSIGN'
+    this.sortingMode = 'AZIMUTH';  // Default for 2-ship
+
+    // Target assignments (explicit via ENGAGE command)
+    // Map of aircraftId -> targetAircraft
+    this.targetAssignments = new Map();
 
     // Formation properties
     this.formationType = config.formationType || 'finger-four';
     this.formationSpacing = config.formationSpacing || 500; // meters
+
+    // BVR coordination (initialized separately for friendly flights)
+    this.coordinator = null;
+  }
+
+  /**
+   * Initialize FlightCoordinator for BVR coordination
+   * Only for friendly flights (side === 'blue')
+   * @param {Simulation} simulation
+   */
+  initCoordinator(simulation) {
+    // Import dynamically to avoid circular dependency
+    import('../ai/FlightCoordinator.js').then(({ FlightCoordinator }) => {
+      // Only create coordinator for friendly flights
+      if (this.aircraft.length > 0 && this.aircraft[0].side === 'blue') {
+        this.coordinator = new FlightCoordinator(this, simulation);
+      }
+    });
   }
 
   /**
@@ -135,5 +161,133 @@ export class Flight {
   getCurrentCommand() {
     if (this.commandHistory.length === 0) return null;
     return this.commandHistory[this.commandHistory.length - 1].command;
+  }
+
+  /**
+   * Sort and assign targets to flight members based on sorting mode
+   * @param {Aircraft[]} hostiles - Array of hostile aircraft to sort
+   * @returns {Map<Aircraft, Aircraft>} Map of friendlyAircraft -> assignedTarget
+   */
+  sortTargets(hostiles) {
+    const assignments = new Map();
+    const members = this.aircraft.filter(ac => ac.isAlive());
+    const targets = hostiles.filter(h => h.isAlive());
+
+    if (members.length === 0 || targets.length === 0) {
+      return assignments;
+    }
+
+    const flightPos = this.getAveragePosition();
+
+    switch (this.sortingMode) {
+      case 'ASSIGN':
+        // Use explicit assignments from targetAssignments map
+        for (const ac of members) {
+          const assigned = this.targetAssignments.get(ac.id);
+          if (assigned?.isAlive()) {
+            assignments.set(ac, assigned);
+          }
+        }
+        break;
+
+      case 'LEAD_TRAIL':
+        // Lead takes nearest, wingmen take farther targets
+        const byRange = this.sortByRange(targets, flightPos);
+        members.forEach((m, i) => {
+          const idx = Math.min(i, byRange.length - 1);
+          if (byRange[idx]) {
+            assignments.set(m, byRange[idx]);
+          }
+        });
+        break;
+
+      case 'AZIMUTH':
+      default:
+        // Lead takes left, wing takes right
+        const byBearing = this.sortByBearing(targets, this.lead);
+        if (members[0] && byBearing[0]) {
+          assignments.set(members[0], byBearing[0]);
+        }
+        if (members[1] && byBearing.length >= 2) {
+          assignments.set(members[1], byBearing[byBearing.length - 1]);
+        }
+        // Additional members take middle targets
+        for (let i = 2; i < members.length && i < byBearing.length; i++) {
+          assignments.set(members[i], byBearing[Math.floor(i / 2)]);
+        }
+        break;
+    }
+
+    return assignments;
+  }
+
+  /**
+   * Sort hostiles by range from a position (nearest first)
+   * @param {Aircraft[]} hostiles
+   * @param {Object} position - {x, y}
+   * @returns {Aircraft[]}
+   */
+  sortByRange(hostiles, position) {
+    return [...hostiles].sort((a, b) => {
+      const dA = Math.hypot(a.position.x - position.x, a.position.y - position.y);
+      const dB = Math.hypot(b.position.x - position.x, b.position.y - position.y);
+      return dA - dB;
+    });
+  }
+
+  /**
+   * Sort hostiles by bearing from reference aircraft (leftmost first)
+   * @param {Aircraft[]} hostiles
+   * @param {Aircraft} refAircraft
+   * @returns {Aircraft[]}
+   */
+  sortByBearing(hostiles, refAircraft) {
+    if (!refAircraft) return hostiles;
+    return [...hostiles].sort((a, b) =>
+      this.relativeBearing(refAircraft, a) - this.relativeBearing(refAircraft, b)
+    );
+  }
+
+  /**
+   * Calculate relative bearing from aircraft to target
+   * @param {Aircraft} aircraft
+   * @param {Aircraft} target
+   * @returns {number} Angle in degrees, -180 to +180 (negative = left)
+   */
+  relativeBearing(aircraft, target) {
+    const dx = target.position.x - aircraft.position.x;
+    const dy = target.position.y - aircraft.position.y;
+    let rel = (Math.atan2(dx, dy) * 180 / Math.PI) - aircraft.heading;
+    while (rel > 180) rel -= 360;
+    while (rel < -180) rel += 360;
+    return rel;
+  }
+
+  /**
+   * Explicitly assign a target to an aircraft (ENGAGE command)
+   * @param {Aircraft} aircraft
+   * @param {Aircraft} target
+   */
+  assignTarget(aircraft, target) {
+    this.targetAssignments.set(aircraft.id, target);
+    this.sortingMode = 'ASSIGN';  // Switch to explicit assignment mode
+  }
+
+  /**
+   * Clear target assignment for an aircraft
+   * @param {Aircraft} aircraft
+   */
+  clearAssignment(aircraft) {
+    this.targetAssignments.delete(aircraft.id);
+  }
+
+  /**
+   * Set sorting mode
+   * @param {string} mode - 'AZIMUTH' | 'LEAD_TRAIL' | 'ASSIGN'
+   */
+  setSortingMode(mode) {
+    if (['AZIMUTH', 'LEAD_TRAIL', 'ASSIGN'].includes(mode)) {
+      this.sortingMode = mode;
+    }
   }
 }

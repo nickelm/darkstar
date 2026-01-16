@@ -29,6 +29,7 @@ export class StartScreen {
         name: 'Training Mission',
         description: 'Learn the basics of GCI operations with a simple intercept scenario.',
         difficulty: 'easy',
+        year: 2020,  // Modern era - all weapons available
         bullseye: { lat: 36.0, lon: -120.0 },
         flights: [
           {
@@ -64,6 +65,7 @@ export class StartScreen {
         name: 'CAP Patrol',
         description: 'Defend the airspace with two fighter flights against multiple enemy waves.',
         difficulty: 'normal',
+        year: 2020,  // Modern era - all weapons available
         bullseye: { lat: 36.0, lon: -120.0 },
         flights: [
           {
@@ -120,6 +122,7 @@ export class StartScreen {
         name: 'Strike Escort',
         description: 'Coordinate multiple flights to defend against a determined enemy assault.',
         difficulty: 'hard',
+        year: 2020,  // Modern era - all weapons available
         bullseye: { lat: 36.0, lon: -120.0 },
         flights: [
           {

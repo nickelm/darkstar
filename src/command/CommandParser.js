@@ -222,7 +222,22 @@ export class CommandParser {
       if (altitude !== null) {
         params.altitude = altitude;
       }
-    } else if (commandType === 'ENGAGE') {
+    } else if (commandType === 'ENGAGE' || commandType === 'COMMIT') {
+      const target = this.extractTarget(segment);
+      if (target !== null) {
+        params.target = target;
+      }
+    } else if (commandType === 'OUT') {
+      const heading = this.extractHeading(segment);
+      if (heading !== null) {
+        params.heading = heading;
+      }
+    } else if (commandType === 'CRANK') {
+      const direction = this.extractDirection(segment);
+      if (direction !== null) {
+        params.direction = direction;
+      }
+    } else if (commandType === 'HOSTILE' || commandType === 'FRIENDLY') {
       const target = this.extractTarget(segment);
       if (target !== null) {
         params.target = target;
@@ -619,7 +634,15 @@ export class CommandParser {
       'PICTURE': /\bPICTURE\b/i,
       'ENGAGE': /\bENGAGE\b/i,
       'EXTEND': /\bEXTEND\b/i,
-      'PRESS': /\bPRESS\b/i
+      'PRESS': /\bPRESS\b/i,
+      'COMMIT': /\bCOMMIT\b/i,
+      'BANZAI': /\bBANZAI\b/i,
+      'ABORT': /\bABORT\b/i,
+      'OUT': /\bOUT\b/i,
+      'CRANK': /\bCRANK\b/i,
+      'HOSTILE': /\bHOSTILE\b/i,
+      'FRIENDLY': /\bFRIENDLY\b/i,
+      'WEAPONS_TIGHT': /\bWEAPONS?\s*TIGHT\b/i
     };
 
     for (const [type, pattern] of Object.entries(commandPatterns)) {
@@ -655,6 +678,17 @@ export class CommandParser {
     const match = text.match(/ANGELS?\s*(\d{1,2})/i);
     if (match) {
       return parseInt(match[1]) * 1000; // Angels are in thousands
+    }
+    return null;
+  }
+
+  extractDirection(text) {
+    // Match left/right direction for CRANK command
+    if (/\bLEFT\b/i.test(text)) {
+      return 'left';
+    }
+    if (/\bRIGHT\b/i.test(text)) {
+      return 'right';
     }
     return null;
   }

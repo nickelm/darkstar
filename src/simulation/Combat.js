@@ -1,7 +1,7 @@
 import { Missile } from './Missile.js';
 import { Merge } from './Merge.js';
-import { WEAPONS } from '../data/weapons.js';
-import { m2nm } from '../util/math.js';
+import { WEAPONS, calculateEffectiveRange } from '../data/weapons.js';
+import { m2nm, wrapDeg, toAspect } from '../util/math.js';
 
 // Distance in meters for merge detection (~5nm)
 const MERGE_DISTANCE = 9260;
@@ -223,6 +223,31 @@ export class Combat {
   }
 
   /**
+   * Get all active missiles targeting a specific aircraft
+   * Optionally filter by shooter's flight
+   * @param {Aircraft} target - The target aircraft
+   * @param {Flight} [fromFlight] - Optional: only count missiles from this flight
+   * @returns {Missile[]}
+   */
+  getMissilesTargeting(target, fromFlight = null) {
+    return this.activeMissiles.filter(m => {
+      if (m.target !== target || m.isDead()) return false;
+      if (fromFlight && m.shooter?.flight !== fromFlight) return false;
+      return true;
+    });
+  }
+
+  /**
+   * Count missiles from a flight targeting a specific aircraft
+   * @param {Aircraft} target
+   * @param {Flight} flight
+   * @returns {number}
+   */
+  countMissilesFromFlightTo(target, flight) {
+    return this.getMissilesTargeting(target, flight).length;
+  }
+
+  /**
    * Get closest threat to an aircraft
    * @param {Aircraft} aircraft
    * @returns {Missile|null}
@@ -261,6 +286,7 @@ export class Combat {
 
   /**
    * Check if aircraft is within firing envelope for a weapon
+   * Uses dynamic range calculation based on launch conditions
    * @param {Aircraft} shooter
    * @param {Aircraft} target
    * @param {string} category - 'fox1', 'fox2', or 'fox3'
@@ -278,20 +304,32 @@ export class Combat {
     const weaponData = WEAPONS[weaponInfo.type];
     if (!weaponData) return false;
 
-    // Calculate range
+    // Calculate range to target
     const dx = target.position.x - shooter.position.x;
     const dy = target.position.y - shooter.position.y;
     const rangeMeters = Math.sqrt(dx * dx + dy * dy);
     const rangeNm = m2nm(rangeMeters);
 
-    // Check range envelope
-    if (rangeNm < weaponData.range.min || rangeNm > weaponData.range.max) {
+    // Calculate target aspect for dynamic range
+    const bearingToTarget = Math.atan2(dx, dy) * 180 / Math.PI;
+    const bearingFromTarget = wrapDeg(bearingToTarget + 180);
+    const aspect = toAspect(bearingFromTarget - target.heading);
+
+    // Calculate effective range based on launch conditions
+    const effectiveRange = calculateEffectiveRange(
+      weaponData,
+      shooter.altitude,
+      shooter.speed,
+      aspect
+    );
+
+    // Check range envelope using effective range
+    if (rangeNm < effectiveRange.min || rangeNm > effectiveRange.max) {
       return false;
     }
 
     // Check if target is within radar gimbal (for radar missiles)
     if (category === 'fox1' || category === 'fox3') {
-      const bearingToTarget = Math.atan2(dx, dy) * 180 / Math.PI;
       let angleOff = bearingToTarget - shooter.heading;
       while (angleOff > 180) angleOff -= 360;
       while (angleOff < -180) angleOff += 360;
@@ -323,6 +361,46 @@ export class Combat {
     }
 
     return null;
+  }
+
+  /**
+   * Check if an aircraft can launch a missile at a target
+   * Enforces all launch discipline rules
+   * @param {Aircraft} shooter
+   * @param {Aircraft} target
+   * @param {string} category - 'fox1', 'fox2', 'fox3'
+   * @returns {{canLaunch: boolean, reason: string}}
+   */
+  canLaunch(shooter, target, category) {
+    // Rule 1: Must have radar lock (STT)
+    if (shooter.lockedTarget !== target) {
+      return { canLaunch: false, reason: 'NO_LOCK' };
+    }
+
+    // Rule 2: Check weapon envelope
+    if (!this.isInFiringEnvelope(shooter, target, category)) {
+      return { canLaunch: false, reason: 'OUT_OF_ENVELOPE' };
+    }
+
+    // Rule 3: Max one active missile in flight per aircraft
+    if (shooter.getActiveMissileCount() >= 1) {
+      return { canLaunch: false, reason: 'MISSILE_IN_FLIGHT' };
+    }
+
+    // Rule 4: Target can't have 2+ missiles from same flight
+    if (shooter.flight) {
+      const missilesOnTarget = this.countMissilesFromFlightTo(target, shooter.flight);
+      if (missilesOnTarget >= 2) {
+        return { canLaunch: false, reason: 'TARGET_SATURATED' };
+      }
+    }
+
+    // Rule 5: Weapon available
+    if (!shooter.hasWeapon(category)) {
+      return { canLaunch: false, reason: 'WINCHESTER' };
+    }
+
+    return { canLaunch: true, reason: 'OK' };
   }
 
   /**
@@ -444,6 +522,11 @@ export class Combat {
       merge,
       participants: merge.participants
     });
+
+    // Emit MERGED comm event for friendly aircraft
+    if (friendly.side === 'blue' && friendly.flight?.coordinator) {
+      friendly.flight.coordinator.emitMerged(friendly);
+    }
 
     // Auto-pause on merge
     if (this.simulation.autoPauseSettings.merge) {

@@ -1,4 +1,5 @@
 import { wrapDeg, m2nm } from '../util/math.js';
+import { BVR_STATES } from '../simulation/Aircraft.js';
 
 /**
  * AI controller for friendly pilot aircraft
@@ -24,9 +25,16 @@ export class PilotAI {
     this.lastWeaponsRequest = 0;
     this.weaponsRequestCooldown = 30;  // seconds
 
+    // Autonomous mode (BANZAI) - skip auth requests, auto-commit
+    this.autonomousMode = false;
+    this.directedCrankDirection = null;  // 'left' or 'right' if GCI directed
+
     // Cranking parameters
     this.crankDirection = 1;  // 1 = right, -1 = left
     this.gimbalLimit = 60;    // degrees
+
+    // BVR state tracking
+    this.lastBVRState = BVR_STATES.PATROL;
   }
 
   update(delta) {
@@ -35,6 +43,7 @@ export class PilotAI {
       if (this.state !== 'DEFENSIVE') {
         this.state = 'DEFENSIVE';
         this.defensiveStartTime = this.simulation.time;
+        this.releaseLock();  // Release lock when going defensive
         this.simulation.events.emit('pilot:defending', {
           aircraft: this.aircraft,
           threat: this.simulation.combat.getClosestThreat(this.aircraft)
@@ -71,6 +80,47 @@ export class PilotAI {
 
     // Sync AI state to aircraft state string
     this.aircraft.aiState = this.state.toLowerCase();
+
+    // Track BVR state changes
+    if (this.aircraft.engagementState !== this.lastBVRState) {
+      this.simulation.events.emit('bvr:stateChange', {
+        aircraft: this.aircraft,
+        oldState: this.lastBVRState,
+        newState: this.aircraft.engagementState
+      });
+      this.lastBVRState = this.aircraft.engagementState;
+    }
+  }
+
+  /**
+   * Transition BVR engagement state
+   * @param {string} newState - BVR_STATES value
+   */
+  transitionBVRState(newState) {
+    const oldState = this.aircraft.engagementState;
+    if (oldState === newState) return;
+
+    this.aircraft.engagementState = newState;
+
+    // Notify flight coordinator if available
+    const coordinator = this.aircraft.flight?.coordinator;
+    if (coordinator) {
+      switch (newState) {
+        case BVR_STATES.TARGET:
+          coordinator.onLockAcquired(this.aircraft, this.target);
+          break;
+        case BVR_STATES.CRANK:
+          coordinator.onCrankStart(this.aircraft);
+          break;
+        case BVR_STATES.EGRESS:
+          if (this.aircraft.isWinchester()) {
+            coordinator.emitWinchester(this.aircraft);
+          } else if (this.aircraft.isBingoFuel()) {
+            coordinator.emitBingo(this.aircraft);
+          }
+          break;
+      }
+    }
   }
 
   /**
@@ -120,7 +170,9 @@ export class PilotAI {
   handleIntercept(delta) {
     if (!this.target || !this.target.isAlive()) {
       this.target = null;
+      this.releaseLock();
       this.state = 'IDLE';
+      this.transitionBVRState(BVR_STATES.PATROL);
       return;
     }
 
@@ -135,9 +187,67 @@ export class PilotAI {
     // Update engagement phase
     this.aircraft.engagementPhase = 'committed';
 
-    // Check if within engagement range (10nm = ~18.5km)
+    // Ensure BVR state is at least COMMIT when intercepting
+    if (this.aircraft.engagementState === BVR_STATES.PATROL ||
+        this.aircraft.engagementState === BVR_STATES.DETECTED ||
+        this.aircraft.engagementState === BVR_STATES.SORTING) {
+      this.transitionBVRState(BVR_STATES.COMMIT);
+    }
+
+    // Try to acquire lock when within BVR range
+    if (rangeNm < 50) {
+      if (this.aircraft.lockedTarget !== this.target) {
+        const acquired = this.acquireLock(this.target);
+        // Transition to TARGET state when lock acquired
+        if (acquired && this.aircraft.engagementState === BVR_STATES.COMMIT) {
+          this.transitionBVRState(BVR_STATES.TARGET);
+        }
+      }
+    }
+
+    // Check if lock is maintained (target still in gimbal)
+    if (this.aircraft.lockedTarget && !this.isInGimbalLimits(this.aircraft.lockedTarget)) {
+      this.releaseLock();
+      // Revert to COMMIT if we lose lock
+      if (this.aircraft.engagementState === BVR_STATES.TARGET) {
+        this.transitionBVRState(BVR_STATES.COMMIT);
+      }
+    }
+
+    // Check weapons authorization and attempt to fire at BVR range
+    // In autonomous mode (BANZAI), treat weapons as always free
+    if (this.isWeaponsFree()) {
+      const weaponCategory = this.simulation.combat.getOptimalWeapon(this.aircraft, this.target);
+
+      if (weaponCategory && this.canFireMissile()) {
+        const launchCheck = this.simulation.combat.canLaunch(
+          this.aircraft,
+          this.target,
+          weaponCategory
+        );
+
+        if (launchCheck.canLaunch) {
+          this.fireMissile(weaponCategory);
+          this.state = 'GUIDING';
+          this.aircraft.engagementPhase = 'guiding';
+          return;
+        } else if (launchCheck.reason === 'TARGET_SATURATED') {
+          this.requestNewTarget();
+        }
+        // Debug: log why we can't launch
+        if (!launchCheck.canLaunch) {
+          console.log(`${this.aircraft.callsign}: canLaunch=${launchCheck.canLaunch}, reason=${launchCheck.reason}, lock=${!!this.aircraft.lockedTarget}`);
+        }
+      }
+    } else {
+      // Weapons hold - request authorization if in range (skip in autonomous mode)
+      if (rangeNm < 40 && this.canRequestWeapons() && !this.autonomousMode) {
+        this.requestWeaponsFree();
+      }
+    }
+
+    // Transition to ENGAGE state for close-range combat
     if (rangeNm < 10) {
-      // Close enough to engage
       this.state = 'ENGAGE';
       this.aircraft.engagementPhase = 'launching';
     }
@@ -146,6 +256,7 @@ export class PilotAI {
   handleEngage(delta) {
     if (!this.target || !this.target.isAlive()) {
       this.target = null;
+      this.releaseLock();
       this.state = 'IDLE';
       this.aircraft.engagementPhase = 'none';
       return;
@@ -158,17 +269,42 @@ export class PilotAI {
     const distance = this.getRangeToTarget();
     const rangeNm = m2nm(distance);
 
+    // Try to acquire/maintain lock when in range
+    if (rangeNm < 50) {  // Within acquisition range
+      if (this.aircraft.lockedTarget !== this.target) {
+        this.acquireLock(this.target);
+      }
+    }
+
+    // Check if lock is maintained (target still in gimbal)
+    if (this.aircraft.lockedTarget && !this.isInGimbalLimits(this.aircraft.lockedTarget)) {
+      this.releaseLock();
+    }
+
     // Check weapons authorization and firing envelope
-    if (this.aircraft.weaponsAuthorization === 'free') {
+    // In autonomous mode (BANZAI), treat weapons as always free
+    if (this.isWeaponsFree()) {
       // Check if we can fire
       const weaponCategory = this.simulation.combat.getOptimalWeapon(this.aircraft, this.target);
 
       if (weaponCategory && this.canFireMissile()) {
-        this.fireMissile(weaponCategory);
+        // Use launch discipline check
+        const launchCheck = this.simulation.combat.canLaunch(
+          this.aircraft,
+          this.target,
+          weaponCategory
+        );
+
+        if (launchCheck.canLaunch) {
+          this.fireMissile(weaponCategory);
+        } else if (launchCheck.reason === 'TARGET_SATURATED') {
+          // Target has enough missiles, try to get a new target from flight sorting
+          this.requestNewTarget();
+        }
       }
     } else {
-      // Weapons hold - request authorization if in range
-      if (rangeNm < 40 && this.canRequestWeapons()) {
+      // Weapons hold - request authorization if in range (skip in autonomous mode)
+      if (rangeNm < 40 && this.canRequestWeapons() && !this.autonomousMode) {
         this.requestWeaponsFree();
       }
     }
@@ -183,8 +319,10 @@ export class PilotAI {
 
     if (!this.target || !this.target.isAlive()) {
       this.target = null;
+      this.releaseLock();
       this.state = 'IDLE';
       this.aircraft.engagementPhase = 'none';
+      this.transitionBVRState(BVR_STATES.PATROL);
       return;
     }
 
@@ -199,6 +337,7 @@ export class PilotAI {
     if (this.activeMissile.category === 'fox3' && this.activeMissile.isActive()) {
       this.state = 'CRANKING';
       this.aircraft.engagementPhase = 'cranking';
+      this.transitionBVRState(BVR_STATES.CRANK);
 
       // Determine crank direction (away from threat's nose)
       this.crankDirection = this.determineCrankDirection();
@@ -217,9 +356,18 @@ export class PilotAI {
 
     if (!this.target || !this.target.isAlive()) {
       this.target = null;
+      this.releaseLock();
       this.state = 'IDLE';
       this.aircraft.engagementPhase = 'none';
       return;
+    }
+
+    // Check if we've lost lock due to gimbal limits (critical for fox1)
+    if (this.activeMissile.category === 'fox1') {
+      if (!this.isInGimbalLimits(this.target)) {
+        // Lost illumination - missile will miss
+        this.releaseLock();
+      }
     }
 
     this.missileGuidedTime += delta;
@@ -283,7 +431,7 @@ export class PilotAI {
    */
   canFireMissile() {
     const timeSinceLast = this.simulation.time - this.lastMissileLaunchTime;
-    return timeSinceLast > 5;  // 5 second cooldown between shots
+    return timeSinceLast > 10;  // 10 second cooldown between shots
   }
 
   /**
@@ -314,7 +462,17 @@ export class PilotAI {
       this.state = 'GUIDING';
       this.aircraft.engagementPhase = 'guiding';
 
-      // Emit fox call
+      // BVR state: LAUNCH then immediately to GUIDE
+      this.transitionBVRState(BVR_STATES.LAUNCH);
+      this.transitionBVRState(BVR_STATES.GUIDE);
+
+      // Notify flight coordinator of launch
+      const coordinator = this.aircraft.flight?.coordinator;
+      if (coordinator) {
+        coordinator.onMissileLaunched(this.aircraft, category, this.target);
+      }
+
+      // Emit fox call (legacy event)
       this.simulation.events.emit('pilot:fox', {
         aircraft: this.aircraft,
         type: category,
@@ -332,13 +490,21 @@ export class PilotAI {
    * Handle missile resolution (hit or miss)
    */
   handleMissileResolution() {
-    if (this.activeMissile) {
-      const result = this.activeMissile.state;
+    const hit = this.activeMissile?.state === 'hit';
+    const missileTarget = this.activeMissile?.target;
 
-      if (result === 'hit') {
+    // Notify flight coordinator
+    const coordinator = this.aircraft.flight?.coordinator;
+    if (coordinator && this.activeMissile) {
+      coordinator.onMissileResolution(this.aircraft, hit, missileTarget);
+    }
+
+    if (this.activeMissile) {
+      // Emit legacy events
+      if (hit) {
         this.simulation.events.emit('pilot:splash', {
           aircraft: this.aircraft,
-          target: this.activeMissile.target
+          target: missileTarget
         });
       } else {
         this.simulation.events.emit('pilot:miss', {
@@ -351,15 +517,39 @@ export class PilotAI {
     this.missileGuidedTime = 0;
     this.notchHeading = null;
 
+    // Transition to RECOMMIT state
+    this.transitionBVRState(BVR_STATES.RECOMMIT);
+
     // Return to engagement if target still alive
     if (this.target && this.target.isAlive()) {
       this.state = 'INTERCEPT';
       this.aircraft.engagementPhase = 'committed';
+      // After recommit, transition back to COMMIT
+      this.transitionBVRState(BVR_STATES.COMMIT);
     } else {
       this.state = 'IDLE';
       this.aircraft.engagementPhase = 'none';
       this.target = null;
+      // Check if should egress (winchester/bingo) or go back to patrol
+      if (this.shouldDisengage()) {
+        this.transitionBVRState(BVR_STATES.EGRESS);
+      } else {
+        this.transitionBVRState(BVR_STATES.PATROL);
+      }
     }
+  }
+
+  /**
+   * Check if weapons are effectively free
+   * Considers autonomous mode (BANZAI) which allows firing without authorization
+   * @returns {boolean}
+   */
+  isWeaponsFree() {
+    // In autonomous mode, always treat as weapons free
+    if (this.autonomousMode || this.aircraft.flight?.autonomous) {
+      return true;
+    }
+    return this.aircraft.weaponsAuthorization === 'free';
   }
 
   /**
@@ -380,6 +570,28 @@ export class PilotAI {
       aircraft: this.aircraft,
       target: this.target
     });
+  }
+
+  /**
+   * Callback when weapons authorization set to free
+   */
+  onWeaponsFree() {
+    // Can be extended to trigger immediate engagement attempts
+  }
+
+  /**
+   * Callback when weapons authorization set to hold
+   */
+  onWeaponsHold() {
+    // Can be extended to abort current engagement
+  }
+
+  /**
+   * Callback when weapons authorization set to tight
+   */
+  onWeaponsTight() {
+    // Weapons tight: only fire on positively identified hostiles
+    // Currently treated similar to hold for simplicity
   }
 
   /**
@@ -459,8 +671,95 @@ export class PilotAI {
 
   clearTarget() {
     this.target = null;
+    this.releaseLock();
     this.state = 'IDLE';
     this.aircraft.engagementPhase = 'none';
+  }
+
+  // Lock management methods
+
+  /**
+   * Attempt to acquire radar lock on target
+   * @param {Aircraft} target
+   * @returns {boolean} True if lock acquired
+   */
+  acquireLock(target) {
+    if (!this.isInGimbalLimits(target)) {
+      return false;
+    }
+
+    // Release any existing lock first
+    this.releaseLock();
+
+    // Acquire new lock
+    this.aircraft.lockedTarget = target;
+    return true;
+  }
+
+  /**
+   * Release current radar lock
+   */
+  releaseLock() {
+    this.aircraft.lockedTarget = null;
+  }
+
+  /**
+   * Check if target is within radar gimbal limits
+   * @param {Aircraft} target
+   * @returns {boolean}
+   */
+  isInGimbalLimits(target) {
+    if (!target) return false;
+
+    const dx = target.position.x - this.aircraft.position.x;
+    const dy = target.position.y - this.aircraft.position.y;
+    const bearing = Math.atan2(dx, dy) * 180 / Math.PI;
+
+    let angleOff = bearing - this.aircraft.heading;
+    while (angleOff > 180) angleOff -= 360;
+    while (angleOff < -180) angleOff += 360;
+
+    const gimbal = this.aircraft.performance?.radar?.gimbal || 60;
+    return Math.abs(angleOff) <= gimbal;
+  }
+
+  /**
+   * Request a new target assignment from flight when current target is saturated
+   */
+  requestNewTarget() {
+    if (!this.aircraft.flight) return;
+
+    const hostiles = this.getNearbyHostiles();
+    if (hostiles.length === 0) return;
+
+    const assignments = this.aircraft.flight.sortTargets(hostiles);
+    const assigned = assignments.get(this.aircraft);
+
+    if (assigned && assigned !== this.target && assigned.isAlive()) {
+      this.setTarget(assigned);
+    }
+  }
+
+  /**
+   * Get nearby hostile aircraft for targeting
+   * @returns {Aircraft[]}
+   */
+  getNearbyHostiles() {
+    const hostiles = [];
+    const maxRange = 92600;  // 50nm in meters
+
+    for (const flight of this.simulation.hostiles) {
+      for (const ac of flight.aircraft) {
+        if (!ac.isAlive()) continue;
+        const dx = ac.position.x - this.aircraft.position.x;
+        const dy = ac.position.y - this.aircraft.position.y;
+        if (Math.sqrt(dx * dx + dy * dy) < maxRange) {
+          hostiles.push(ac);
+        }
+      }
+    }
+
+    return hostiles;
   }
 
   selectTarget() {

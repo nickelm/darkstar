@@ -1,8 +1,10 @@
 import { wrapDeg, m2nm } from '../util/math.js';
+import { BVR_STATES } from '../simulation/Aircraft.js';
 
 /**
  * AI controller for hostile aircraft
  * Handles state machine for INGRESS, ENGAGE, EGRESS, DEFENSIVE states
+ * Also tracks BVR timeline states autonomously (no player prompts)
  */
 export class EnemyAI {
   constructor(aircraft, simulation) {
@@ -25,6 +27,9 @@ export class EnemyAI {
     // Defensive tracking
     this.defensiveStartTime = 0;
     this.notchHeading = null;
+
+    // BVR state tracking
+    this.lastBVRState = BVR_STATES.PATROL;
   }
 
   update(delta) {
@@ -34,6 +39,7 @@ export class EnemyAI {
         this.state = 'DEFENSIVE';
         this.defensiveStartTime = this.simulation.time;
         this.notchHeading = null;
+        this.releaseLock();  // Release lock when going defensive
       }
     }
 
@@ -54,11 +60,51 @@ export class EnemyAI {
 
     // Sync AI state to aircraft state string
     this.aircraft.aiState = this.state.toLowerCase();
+
+    // Update BVR state autonomously (no prompts for enemies)
+    this.updateBVRState();
+  }
+
+  /**
+   * Update BVR engagement state autonomously
+   * Enemies make decisions without player interaction
+   */
+  updateBVRState() {
+    const currentState = this.aircraft.engagementState;
+
+    // Track state changes for events
+    if (currentState !== this.lastBVRState) {
+      this.simulation.events.emit('bvr:stateChange', {
+        aircraft: this.aircraft,
+        oldState: this.lastBVRState,
+        newState: currentState
+      });
+      this.lastBVRState = currentState;
+    }
+  }
+
+  /**
+   * Transition BVR state
+   * @param {string} newState - BVR_STATES value
+   */
+  transitionBVRState(newState) {
+    if (this.aircraft.engagementState !== newState) {
+      this.aircraft.engagementState = newState;
+    }
   }
 
   // State handlers
 
   handleIngress(delta) {
+    // BVR state: PATROL while ingressing
+    if (this.aircraft.engagementState === BVR_STATES.PATROL) {
+      // Check for threats - autonomous DETECTED transition
+      const threat = this.detectThreat();
+      if (threat) {
+        this.transitionBVRState(BVR_STATES.DETECTED);
+      }
+    }
+
     // Fly toward objective (bullseye by default)
     const objective = this.getObjective();
     const targetPos = this.simulation.toLocal(objective.lat, objective.lon);
@@ -82,13 +128,17 @@ export class EnemyAI {
     if (threat && this.shouldEngage(threat)) {
       this.engageTarget = threat;
       this.state = 'ENGAGE';
+      // Autonomous COMMIT - enemies are always weapons free
+      this.transitionBVRState(BVR_STATES.COMMIT);
     }
   }
 
   handleEngage(delta) {
     if (!this.engageTarget || !this.engageTarget.isAlive()) {
       this.engageTarget = null;
+      this.releaseLock();
       this.state = 'INGRESS';
+      this.transitionBVRState(BVR_STATES.PATROL);
       return;
     }
 
@@ -102,9 +152,54 @@ export class EnemyAI {
     const distance = Math.sqrt(dx * dx + dy * dy);
     const rangeNm = m2nm(distance);
 
+    // Try to acquire/maintain lock when in range
+    if (rangeNm < 50) {  // Within acquisition range
+      if (this.aircraft.lockedTarget !== this.engageTarget) {
+        const acquired = this.acquireLock(this.engageTarget);
+        // Transition to TARGET when lock acquired
+        if (acquired && this.aircraft.engagementState === BVR_STATES.COMMIT) {
+          this.transitionBVRState(BVR_STATES.TARGET);
+        }
+      }
+    }
+
+    // Check if lock is maintained (target still in gimbal)
+    if (this.aircraft.lockedTarget && !this.isInGimbalLimits(this.aircraft.lockedTarget)) {
+      this.releaseLock();
+      // Revert to COMMIT if we lose lock
+      if (this.aircraft.engagementState === BVR_STATES.TARGET) {
+        this.transitionBVRState(BVR_STATES.COMMIT);
+      }
+    }
+
     // Enemy AI is always weapons free - fire when in envelope
     if (this.canFireMissile() && this.isInFiringEnvelope(rangeNm)) {
       this.fireMissile();
+    }
+
+    // Handle active missile guidance
+    if (this.activeMissile && !this.activeMissile.isDead()) {
+      // GUIDE state while missile in flight
+      if (this.aircraft.engagementState === BVR_STATES.TARGET ||
+          this.aircraft.engagementState === BVR_STATES.LAUNCH) {
+        this.transitionBVRState(BVR_STATES.GUIDE);
+      }
+
+      // Check for fox3 going active -> CRANK
+      if (this.activeMissile.category === 'fox3' && this.activeMissile.isActive()) {
+        if (this.aircraft.engagementState === BVR_STATES.GUIDE) {
+          this.transitionBVRState(BVR_STATES.CRANK);
+        }
+      }
+    } else if (this.activeMissile?.isDead()) {
+      // Missile resolved - RECOMMIT
+      this.transitionBVRState(BVR_STATES.RECOMMIT);
+      this.activeMissile = null;
+
+      // Then back to COMMIT if target alive
+      if (this.engageTarget?.isAlive()) {
+        this.transitionBVRState(BVR_STATES.COMMIT);
+      }
     }
   }
 
@@ -157,7 +252,7 @@ export class EnemyAI {
    */
   canFireMissile() {
     const timeSinceLast = this.simulation.time - this.lastMissileLaunchTime;
-    if (timeSinceLast < 5) return false;  // 5 second cooldown
+    if (timeSinceLast < 10) return false;  // 10 second cooldown
 
     // Check if we have weapons
     return this.aircraft.getBestBVRWeapon() !== null;
@@ -181,6 +276,25 @@ export class EnemyAI {
     const weaponCategory = this.aircraft.getBestBVRWeapon();
     if (!weaponCategory) return;
 
+    // Must have lock first
+    if (this.aircraft.lockedTarget !== this.engageTarget) {
+      this.acquireLock(this.engageTarget);
+    }
+    if (!this.aircraft.lockedTarget) return;
+
+    // Use full launch discipline check (includes missile-in-flight, saturation, etc.)
+    const launchCheck = this.simulation.combat.canLaunch(
+      this.aircraft,
+      this.engageTarget,
+      weaponCategory
+    );
+
+    if (!launchCheck.canLaunch) {
+      // Debug: log why enemy can't launch
+      // console.log(`${this.aircraft.callsign}: canLaunch=${launchCheck.canLaunch}, reason=${launchCheck.reason}`);
+      return;  // Can't fire - discipline check failed
+    }
+
     const weaponInfo = this.aircraft.weaponInventory[weaponCategory];
     if (!weaponInfo || weaponInfo.count <= 0) return;
 
@@ -199,6 +313,10 @@ export class EnemyAI {
     if (missile) {
       this.activeMissile = missile;
       this.lastMissileLaunchTime = this.simulation.time;
+
+      // BVR state: LAUNCH then GUIDE
+      this.transitionBVRState(BVR_STATES.LAUNCH);
+      this.transitionBVRState(BVR_STATES.GUIDE);
 
       // Auto-pause on missile launch (enemy fires too!)
       if (this.simulation.autoPauseSettings.missileLaunch) {
@@ -285,6 +403,53 @@ export class EnemyAI {
     while (angle > 180) angle -= 360;
     while (angle < -180) angle += 360;
     return angle;
+  }
+
+  // Lock management methods
+
+  /**
+   * Attempt to acquire radar lock on target
+   * @param {Aircraft} target
+   * @returns {boolean} True if lock acquired
+   */
+  acquireLock(target) {
+    if (!this.isInGimbalLimits(target)) {
+      return false;
+    }
+
+    // Release any existing lock first
+    this.releaseLock();
+
+    // Acquire new lock
+    this.aircraft.lockedTarget = target;
+    return true;
+  }
+
+  /**
+   * Release current radar lock
+   */
+  releaseLock() {
+    this.aircraft.lockedTarget = null;
+  }
+
+  /**
+   * Check if target is within radar gimbal limits
+   * @param {Aircraft} target
+   * @returns {boolean}
+   */
+  isInGimbalLimits(target) {
+    if (!target) return false;
+
+    const dx = target.position.x - this.aircraft.position.x;
+    const dy = target.position.y - this.aircraft.position.y;
+    const bearing = Math.atan2(dx, dy) * 180 / Math.PI;
+
+    let angleOff = bearing - this.aircraft.heading;
+    while (angleOff > 180) angleOff -= 360;
+    while (angleOff < -180) angleOff += 360;
+
+    const gimbal = this.aircraft.performance?.radar?.gimbal || 60;
+    return Math.abs(angleOff) <= gimbal;
   }
 
   selectTarget() {

@@ -1,5 +1,5 @@
 import { PIDController } from '../util/pid.js';
-import { WEAPONS } from '../data/weapons.js';
+import { WEAPONS, calculateEffectiveRange } from '../data/weapons.js';
 import { wrapDeg, m2nm, kts2ms, toAspect } from '../util/math.js';
 
 let missileIdCounter = 0;
@@ -25,6 +25,16 @@ export class Missile {
     this.state = 'flight';             // 'flight', 'active', 'terminal', 'hit', 'miss'
     this.timeOfFlight = 0;
     this.maxDuration = 60;
+
+    // Motor/coast phase tracking
+    this.phase = 'motor';              // 'motor' | 'coast'
+    this.motorTime = 0;                // Seconds of motor burn remaining
+    this.coastTime = 0;                // Seconds of coast remaining
+
+    // Launch conditions (stored for range/Pk calculations)
+    this.launchAltitude = 0;
+    this.launchSpeed = 0;
+    this.initialAspect = 0;
 
     // Guidance
     this.guidancePID = null;
@@ -52,10 +62,27 @@ export class Missile {
     this.heading = wrapDeg(Math.atan2(dx, dy) * 180 / Math.PI);
 
     // Initialize from weapon data
-    this.speed = this.weaponData.speed || 2500;
-    this.maxDuration = this.weaponData.duration || 60;
-    this.needsIllumination = this.weaponData.needsIllumination || false;
-    this.activeRange = this.weaponData.pk?.active || 10;
+    const weapon = this.weaponData;
+
+    // Inherit platform velocity at launch
+    // Missile speed = platform speed + motor boost (weapon speed)
+    const platformSpeed = this.shooter.speed || 0;
+    const motorBoost = weapon.speed || 2500;
+    this.speed = platformSpeed + motorBoost;
+
+    // Motor/coast duration from weapon data
+    this.motorTime = weapon.motor || 9;
+    this.coastTime = weapon.coast || 55;
+    this.maxDuration = this.motorTime + this.coastTime;
+
+    // Store launch conditions for range/Pk calculations
+    this.launchAltitude = this.shooter.altitude;
+    this.launchSpeed = platformSpeed;
+    this.initialAspect = this.getTargetAspect();
+
+    // Guidance parameters
+    this.needsIllumination = weapon.needsIllumination || false;
+    this.activeRange = weapon.pk?.active || 10;
 
     // Initialize guidance PID - missiles turn faster than aircraft
     // Higher gains for more responsive tracking
@@ -74,7 +101,7 @@ export class Missile {
 
     this.timeOfFlight += delta;
 
-    // Check timeout (fuel exhausted)
+    // Check timeout (motor + coast exhausted)
     if (this.timeOfFlight > this.maxDuration) {
       this.state = 'miss';
       return;
@@ -147,14 +174,48 @@ export class Missile {
     this.position.x += speedMs * Math.sin(headingRad) * delta;
     this.position.y += speedMs * Math.cos(headingRad) * delta;
 
-    // Speed decay (drag) - missiles slow down over time
-    // Decay rate depends on altitude (thinner air = less drag)
-    const altitudeFactor = Math.max(0.5, 1 - this.altitude / 100000);
-    this.speed *= (1 - 0.002 * altitudeFactor);
+    // Update flight phase (motor/coast) and speed
+    this.updateFlightPhase(delta);
 
     // Minimum speed threshold - if too slow, missile can't maneuver effectively
     if (this.speed < 500) {
       this.state = 'miss';
+    }
+  }
+
+  /**
+   * Update missile flight phase and speed
+   * Motor phase: maintain high speed
+   * Coast phase: linear speed decay based on altitude
+   */
+  updateFlightPhase(delta) {
+    const weapon = this.weaponData;
+
+    if (this.motorTime > 0) {
+      // Motor phase - maintain/build to peak speed
+      this.phase = 'motor';
+      this.motorTime -= delta;
+
+      // During motor burn, accelerate to peak over first 2 seconds
+      const peakSpeed = (this.launchSpeed || 0) + (weapon.speed || 2500);
+      if (this.timeOfFlight < 2) {
+        this.speed = this.speed + (peakSpeed - this.speed) * delta * 0.5;
+      }
+      // No speed decay during motor burn
+
+    } else if (this.coastTime > 0) {
+      // Coast phase - linear speed decay
+      this.phase = 'coast';
+      this.coastTime -= delta;
+
+      // Calculate decay rate based on altitude (thinner air = less drag)
+      // At sea level: lose ~30% speed over coast duration
+      // At 40k ft: lose ~15% speed over coast duration
+      const altFactor = Math.max(0.5, 1 - this.altitude / 80000);
+      const totalCoast = weapon.coast || 55;
+      const decayPerSecond = (weapon.speed * 0.30 * altFactor) / totalCoast;
+
+      this.speed -= decayPerSecond * delta;
     }
   }
 
@@ -182,20 +243,26 @@ export class Missile {
 
     let pk = weapon.pk?.base || 0.5;
 
+    // Get effective range based on launch conditions
+    const effectiveRange = calculateEffectiveRange(
+      weapon,
+      this.launchAltitude,
+      this.launchSpeed,
+      this.initialAspect
+    );
+
     // Range modifier: optimal at mid-range, reduced at extremes
     const rangeNm = m2nm(this.getRangeToTarget());
-    const minRange = weapon.range?.min || 2;
-    const maxRange = weapon.range?.max || 45;
-    const optimalRange = (minRange + maxRange) / 2;
 
-    if (rangeNm < minRange) {
+    if (rangeNm < effectiveRange.min) {
       // Too close - reduced Pk
       pk *= 0.5;
-    } else if (rangeNm > maxRange) {
+    } else if (rangeNm > effectiveRange.max) {
       // Too far - significantly reduced Pk
       pk *= 0.2;
     } else {
       // Within envelope - slight reduction at extremes
+      const optimalRange = (effectiveRange.min + effectiveRange.max) / 2;
       const rangeRatio = Math.abs(rangeNm - optimalRange) / optimalRange;
       pk *= (1 - rangeRatio * 0.3);
     }

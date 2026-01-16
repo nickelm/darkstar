@@ -1269,6 +1269,12 @@ html, body {
 .databox-state-rtb { color: #888; }
 .databox-state-ingress { color: #ff8800; }
 .databox-state-egress { color: #888; }
+.databox-state-guiding { color: #ff6600; }
+.databox-state-cranking { color: #ff9900; }
+
+/* Weapons authorization states */
+.databox-weapons-hold { color: #888; }
+.databox-weapons-free { color: #4CAF50; font-weight: bold; }
 
 /* Settings Modal */
 #settings-modal {
@@ -1815,4 +1821,30 @@ html, body {
 
 .leaflet-control-attribution a {
   color: #888 !important;
+}
+
+/* Cursor Info Display (lower-left corner) */
+.cursor-info {
+  position: absolute;
+  bottom: 100px;
+  left: 10px;
+  background: rgba(37, 37, 64, 0.9);
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: #00BFFF;
+  z-index: 500;
+  pointer-events: none;
+}
+
+.cursor-info .bullseye {
+  font-weight: bold;
+}
+
+.cursor-info .latlon {
+  color: #888;
+  font-size: 10px;
+  margin-top: 2px;
 }

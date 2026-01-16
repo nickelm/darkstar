@@ -9,6 +9,7 @@ import { VoiceOutput } from './voice/VoiceOutput.js';
 import { CommsLog } from './ui/CommsLog.js';
 import { Subtitles } from './ui/Subtitles.js';
 import { createAudioContext, resumeAudioContext } from './util/audio.js';
+import { CommsQueue } from './ai/CommsQueue.js';
 
 // Phase 5a imports
 import { settings } from './util/Settings.js';
@@ -18,6 +19,8 @@ import { SettingsModal } from './ui/SettingsModal.js';
 import { OutboxPanel } from './ui/OutboxPanel.js';
 import { TrackDatabox } from './ui/TrackDatabox.js';
 import { iconLoader } from './ui/IconLoader.js';
+import { MeasurementTool } from './ui/MeasurementTool.js';
+import { CursorInfo } from './ui/CursorInfo.js';
 
 class Darkstar {
   constructor() {
@@ -36,6 +39,7 @@ class Darkstar {
     // Communications UI
     this.commsLog = null;
     this.subtitles = null;
+    this.commsQueue = null;
 
     // Phase 5a UI components
     this.settings = settings;  // Use singleton
@@ -44,6 +48,10 @@ class Darkstar {
     this.settingsModal = null;
     this.outboxPanel = null;
     this.trackDatabox = null;
+
+    // Measurement tool and cursor info
+    this.measurementTool = null;
+    this.cursorInfo = null;
 
     this.lastTimestamp = 0;
     this.running = false;
@@ -90,6 +98,7 @@ class Darkstar {
     this.commandBar = new CommandBar(commandBarContainer, this.simulation, this.outbox);
     this.commsLog = new CommsLog(commsLogContainer);
     this.subtitles = new Subtitles(subtitlesContainer);
+    this.commsQueue = new CommsQueue();
 
     // Phase 5a UI components
     this.startScreen = new StartScreen(startScreenContainer);
@@ -132,6 +141,17 @@ class Darkstar {
 
     // Wire up map view to simulation for combat rendering
     this.mapView.setSimulation(this.simulation);
+
+    // Create and wire measurement tool
+    this.measurementTool = new MeasurementTool(this.mapView);
+    this.measurementTool.setSimulation(this.simulation);
+    this.mapView.setMeasurementTool(this.measurementTool);
+
+    // Create and wire cursor info
+    this.cursorInfo = new CursorInfo(mapContainer);
+    this.cursorInfo.init();
+    this.cursorInfo.setSimulation(this.simulation);
+    this.mapView.setCursorInfo(this.cursorInfo);
 
     // Set up global keyboard shortcuts
     this.setupKeyboardShortcuts();
@@ -305,6 +325,9 @@ class Darkstar {
     // Initialize subtitles with map and simulation references
     this.subtitles.init(this.mapView, this.simulation);
 
+    // Wire up communication events from FlightCoordinator
+    this.setupCommunicationEvents();
+
     // Initialize map view
     this.mapView.init(scenarioData.bullseye, 8);
     this.mapView.setScenario(scenarioData);
@@ -379,6 +402,9 @@ class Darkstar {
     // Update subtitles (remove expired)
     this.subtitles.update(delta);
 
+    // Process communication queue
+    this.processCommsQueue();
+
     // Update command bar (time display)
     this.commandBar.update();
 
@@ -445,6 +471,55 @@ class Darkstar {
     }
 
     return aliases;
+  }
+
+  /**
+   * Set up listeners for communication events from FlightCoordinator
+   * Routes comm:event through CommsQueue for priority-based processing
+   */
+  setupCommunicationEvents() {
+    this.simulation.events.on('comm:event', (event) => {
+      // Add to priority queue instead of processing immediately
+      this.commsQueue.add(event);
+    });
+
+    // Also listen for BVR state changes (for debugging/logging)
+    this.simulation.events.on('bvr:stateChange', (data) => {
+      console.log(`BVR: ${data.aircraft.callsign} ${data.oldState} -> ${data.newState}`);
+    });
+  }
+
+  /**
+   * Process the communication queue
+   * Routes queued events to CommsLog, Subtitles, and VoiceOutput
+   */
+  processCommsQueue() {
+    const currentTime = this.simulation.time;
+    const event = this.commsQueue.update(currentTime);
+
+    if (!event) return;
+
+    // Get the message text
+    const message = event.getMessage();
+    const speaker = event.speaker;
+
+    // Log to comms log with appropriate priority
+    this.commsLog.addEntry({
+      channel: 'strike',
+      speaker: speaker,
+      message: message,
+      priority: event.getPriorityClass(),
+      callsign: event.flight?.callsign
+    });
+
+    // Show subtitle (tracks speaker position if available)
+    this.subtitles.show(speaker, message);
+
+    // Speak via voice output (unless at high time scale)
+    const timeScale = this.simulation.timeScale || 1;
+    if (timeScale <= 1 && this.voiceOutput) {
+      this.voiceOutput.speakAsPilot(speaker, message);
+    }
   }
 
   // Add hostile for testing auto-pause

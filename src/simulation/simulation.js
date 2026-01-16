@@ -35,6 +35,7 @@ export class Simulation {
 
     this.bullseye = { lat: 0, lon: 0 };
     this.banditCounter = 0; // For assigning Bandit IDs
+    this.year = null; // Scenario year for era-based loadout filtering
 
     // Auto-pause settings
     this.autoPauseSettings = {
@@ -59,6 +60,9 @@ export class Simulation {
     this.bullseye = scenarioData.bullseye;
     this.geoRef = new GeoReference(this.bullseye.lat, this.bullseye.lon);
     this.banditCounter = 0;
+
+    // Store scenario year for era-based loadout filtering (null = modern/all weapons)
+    this.year = scenarioData.year || null;
 
     // Create friendly flights from scenario
     if (scenarioData.flights) {
@@ -87,6 +91,11 @@ export class Simulation {
     this.previousHostileCount = this.hostiles.reduce((sum, f) => sum + f.aircraft.length, 0);
     this.mergeAnnounced.clear();
     this.autoPauseReason = null;
+
+    // Initialize FlightCoordinators for friendly flights (BVR coordination)
+    for (const flight of this.flights) {
+      flight.initCoordinator(this);
+    }
   }
 
   /**
@@ -115,7 +124,8 @@ export class Simulation {
         id: `${flightData.callsign}-${i + 1}`,
         callsign: `${flightData.callsign}-${i + 1}`,
         type: flightData.type,
-        side: side
+        side: side,
+        year: this.year  // Pass scenario year for era-based loadout filtering
       });
 
       // Set geo reference
@@ -171,6 +181,13 @@ export class Simulation {
     for (const flight of this.hostiles) {
       for (const aircraft of flight.aircraft) {
         aircraft.update(scaledDelta);
+      }
+    }
+
+    // Update FlightCoordinators (BVR state management)
+    for (const flight of this.flights) {
+      if (flight.coordinator) {
+        flight.coordinator.update(scaledDelta);
       }
     }
 

@@ -1,6 +1,20 @@
 import { PIDController } from '../util/pid.js';
 import { getVelocity, kts2ms, wrapDeg } from '../util/math.js';
-import { AIRCRAFT } from '../data/aircraft.js';
+import { AIRCRAFT, getLoadoutForYear } from '../data/aircraft.js';
+
+// BVR engagement timeline states
+export const BVR_STATES = {
+  PATROL: 'PATROL',       // Default - flying assigned pattern
+  DETECTED: 'DETECTED',   // Radar contact - continue patrol, report CONTACT
+  SORTING: 'SORTING',     // Multiple targets - flight assigns targets per doctrine
+  COMMIT: 'COMMIT',       // Authorization received - turn toward, accelerate
+  TARGET: 'TARGET',       // STT lock acquired - close to launch range
+  LAUNCH: 'LAUNCH',       // Weapon away - report FOX call
+  GUIDE: 'GUIDE',         // Missile in flight - fox1: maintain lock, fox3: until active
+  CRANK: 'CRANK',         // Post-launch - turn to gimbal limit, reduce closure
+  RECOMMIT: 'RECOMMIT',   // Splash or timeout - re-engage or RTB decision
+  EGRESS: 'EGRESS'        // Winchester/bingo - disengaging
+};
 
 export class Aircraft {
   constructor(config) {
@@ -30,8 +44,11 @@ export class Aircraft {
     this.missilesInFlight = [];          // Missiles we've launched
     this.inboundThreats = [];            // Missiles targeting us
 
-    // Initialize weapon inventory from aircraft data
-    this.weaponInventory = this.initWeaponInventory(config.type);
+    // BVR timeline state (separate from engagementPhase for tracking timeline position)
+    this.engagementState = 'PATROL';     // BVR_STATES enum value
+
+    // Initialize weapon inventory from aircraft data (filtered by scenario year if provided)
+    this.weaponInventory = this.initWeaponInventory(config.type, config.year);
 
     // Control
     this.headingPID = null;
@@ -42,6 +59,7 @@ export class Aircraft {
     this.aiState = 'idle';
     this.currentCommand = null;
     this.target = null;
+    this.lockedTarget = null;  // STT radar lock - only one at a time
 
     // Flight membership
     this.flight = null;
@@ -209,19 +227,34 @@ export class Aircraft {
   }
 
   /**
-   * Initialize weapon inventory from aircraft type data
+   * Count missiles we've launched that are still in flight
+   * @returns {number}
    */
-  initWeaponInventory(type) {
-    const aircraftData = AIRCRAFT[type];
-    if (!aircraftData || !aircraftData.weapons) {
-      return { fox3: { type: null, count: 0 }, fox1: { type: null, count: 0 }, fox2: { type: null, count: 0 } };
-    }
+  getActiveMissileCount() {
+    return this.missilesInFlight.filter(m => !m.isDead()).length;
+  }
 
-    const weapons = aircraftData.weapons;
+  /**
+   * Get all active missiles we've launched
+   * @returns {Missile[]}
+   */
+  getActiveMissiles() {
+    return this.missilesInFlight.filter(m => !m.isDead());
+  }
+
+  /**
+   * Initialize weapon inventory from aircraft type data
+   * Optionally filtered by scenario year for era-appropriate loadouts
+   * @param {string} type - Aircraft type (e.g., 'F-15C')
+   * @param {number} [year] - Scenario year for era filtering (null = modern loadout)
+   */
+  initWeaponInventory(type, year = null) {
+    const loadout = getLoadoutForYear(type, year);
+
     return {
-      fox3: weapons.fox3 ? { type: weapons.fox3.type, count: weapons.fox3.count } : { type: null, count: 0 },
-      fox1: weapons.fox1 ? { type: weapons.fox1.type, count: weapons.fox1.count } : { type: null, count: 0 },
-      fox2: weapons.fox2 ? { type: weapons.fox2.type, count: weapons.fox2.count } : { type: null, count: 0 }
+      fox3: loadout.fox3 ? { type: loadout.fox3.type, count: loadout.fox3.count } : { type: null, count: 0 },
+      fox1: loadout.fox1 ? { type: loadout.fox1.type, count: loadout.fox1.count } : { type: null, count: 0 },
+      fox2: loadout.fox2 ? { type: loadout.fox2.type, count: loadout.fox2.count } : { type: null, count: 0 }
     };
   }
 

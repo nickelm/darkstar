@@ -268,6 +268,10 @@ export class TrackDatabox {
           <span class="databox-label">Task</span>
           <span class="databox-value databox-state-${aiState.toLowerCase()}">${aiState}</span>
         </div>
+        <div class="databox-row databox-weapons-auth">
+          <span class="databox-label">Wpns</span>
+          <span class="databox-value databox-weapons-${aircraft.weaponsAuthorization || 'hold'}">${(aircraft.weaponsAuthorization || 'hold').toUpperCase()}</span>
+        </div>
       </div>
     `;
 
@@ -592,6 +596,11 @@ export class TrackDatabox {
           const aiState = aircraft.ai?.state || 'unknown';
           valueEl.textContent = aiState;
           valueEl.className = `databox-value databox-state-${aiState.toLowerCase()}`;
+          break;
+        case 'Wpns':
+          const wpnsAuth = aircraft.weaponsAuthorization || 'hold';
+          valueEl.textContent = wpnsAuth.toUpperCase();
+          valueEl.className = `databox-value databox-weapons-${wpnsAuth}`;
           break;
       }
     });

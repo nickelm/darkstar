@@ -1,3 +1,5 @@
+import { WEAPONS } from './weapons.js';
+
 // Icon path mappings for aircraft silhouettes
 export const AIRCRAFT_ICONS = {
   'F-14': '/icons/aircraft/F-14.svg',
@@ -151,3 +153,85 @@ export const AIRCRAFT = {
     mergeRating: 0.6
   }
 };
+
+/**
+ * Find a fallback weapon for era filtering when primary weapon not available
+ * @param {string} side - 'blue' or 'red'
+ * @param {string} category - 'fox3', 'fox1', 'fox2'
+ * @param {number} year - Scenario year
+ * @returns {Object|null} Fallback weapon { type, count } or null
+ */
+function findFallbackWeapon(side, category, year) {
+  // Define fallback chains by side and category
+  // Pre-1991 US: No AIM-120C, fall back to AIM-7M for BVR
+  // Pre-1994 Russia: No R-77, fall back to R-27ER or R-27R
+  const fallbacks = {
+    blue: {
+      fox3: ['AIM-7M'],      // Fox3 falls back to fox1 capability
+      fox1: ['AIM-7M'],
+      fox2: ['AIM-9M']
+    },
+    red: {
+      fox3: ['R-27ER', 'R-27R'],  // Fox3 falls back to R-27 variants
+      fox1: ['R-27ER', 'R-27R'],
+      fox2: ['R-73']
+    }
+  };
+
+  const candidates = fallbacks[side]?.[category] || [];
+  const defaultCounts = { fox3: 4, fox1: 4, fox2: 2 };
+
+  for (const weaponType of candidates) {
+    const weaponData = WEAPONS[weaponType];
+    if (weaponData && weaponData.year <= year) {
+      return { type: weaponType, count: defaultCounts[category] };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Get era-appropriate loadout for an aircraft type
+ * Filters out weapons not available in the given year
+ *
+ * Era rules:
+ * - Pre-1991 US: No AIM-120C (AMRAAM), use AIM-7M + AIM-9M
+ * - Pre-1994 Russia: No R-77 (Adder), use R-27 variants
+ *
+ * @param {string} aircraftType - e.g., 'F-15C', 'MiG-29'
+ * @param {number} year - Scenario year (null/undefined = modern, all weapons available)
+ * @returns {Object} Filtered weapons loadout { fox3?, fox1?, fox2?, gun }
+ */
+export function getLoadoutForYear(aircraftType, year) {
+  const aircraftData = AIRCRAFT[aircraftType];
+  if (!aircraftData || !aircraftData.weapons) {
+    return { fox3: null, fox1: null, fox2: null, gun: false };
+  }
+
+  // If no year specified, return full modern loadout (backward compatibility)
+  if (year == null) {
+    return { ...aircraftData.weapons };
+  }
+
+  const weapons = aircraftData.weapons;
+  const filtered = { gun: weapons.gun || false };
+
+  // Check each weapon category
+  for (const category of ['fox3', 'fox1', 'fox2']) {
+    if (weapons[category]) {
+      const weaponType = weapons[category].type;
+      const weaponData = WEAPONS[weaponType];
+
+      // Include weapon if it was available by the scenario year
+      if (weaponData && weaponData.year <= year) {
+        filtered[category] = { ...weapons[category] };
+      } else {
+        // Weapon not available - try to find fallback
+        filtered[category] = findFallbackWeapon(aircraftData.side, category, year);
+      }
+    }
+  }
+
+  return filtered;
+}

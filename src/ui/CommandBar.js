@@ -176,6 +176,8 @@ export class CommandBar {
       { value: 'BUSTER', label: 'BUSTER - Max cruise' },
       { value: 'GATE', label: 'GATE - Afterburner' },
       { value: 'ENGAGE', label: 'ENGAGE - Attack target' },
+      { value: 'WEAPONS_FREE', label: 'WEAPONS FREE - Clear to fire' },
+      { value: 'WEAPONS_HOLD', label: 'WEAPONS HOLD - Do not fire' },
       { value: 'RTB', label: 'RTB - Return to base' }
     ];
 
