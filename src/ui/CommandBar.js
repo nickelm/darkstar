@@ -1,4 +1,5 @@
 import { COMMANDS, Command } from '../command/Commands.js';
+import { TimeControls } from './TimeControls.js';
 
 export class CommandBar {
   constructor(container, simulation, outbox) {
@@ -13,6 +14,9 @@ export class CommandBar {
     this.selectedParams = {};
 
     this.elements = {};
+
+    // Time controls component
+    this.timeControls = null;
 
     // Voice input reference (set by main.js)
     this.voiceInput = null;
@@ -29,6 +33,7 @@ export class CommandBar {
 
   render() {
     this.container.innerHTML = `
+      <div class="time-controls-container"></div>
       <button class="cmd-ptt" title="Push to Talk (\`)">
         <span class="ptt-icon"></span>
         <span class="ptt-status">PTT</span>
@@ -51,6 +56,7 @@ export class CommandBar {
     `;
 
     // Cache element references
+    this.elements.timeControlsContainer = this.container.querySelector('.time-controls-container');
     this.elements.pttBtn = this.container.querySelector('.cmd-ptt');
     this.elements.pttIcon = this.container.querySelector('.ptt-icon');
     this.elements.pttStatus = this.container.querySelector('.ptt-status');
@@ -60,6 +66,10 @@ export class CommandBar {
     this.elements.sendBtn = this.container.querySelector('.cmd-send');
     this.elements.clearBtn = this.container.querySelector('.cmd-clear');
     this.elements.dropdown = this.container.querySelector('.cmd-dropdown');
+
+    // Initialize time controls
+    this.timeControls = new TimeControls(this.elements.timeControlsContainer, this.simulation);
+    this.timeControls.init();
   }
 
   bindEvents() {
@@ -353,6 +363,15 @@ export class CommandBar {
 
   handleKeydown(event) {
     // Future keyboard handling
+  }
+
+  /**
+   * Update time controls display (called from game loop)
+   */
+  update() {
+    if (this.timeControls) {
+      this.timeControls.updateDisplay();
+    }
   }
 
   /**

@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Darkstar</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
@@ -11,14 +12,16 @@
   <div id="app">
     <div id="start-screen"></div>
     <div id="game" class="hidden">
+      <div id="top-navbar"></div>
       <div id="map"></div>
+      <div id="track-databoxes"></div>
       <div id="command-bar"></div>
       <div id="side-panel"></div>
       <div id="comms-log"></div>
       <div id="outbox-panel"></div>
       <div id="subtitles"></div>
       <div id="advisor"></div>
-      <div id="time-controls"></div>
+      <div id="settings-modal"></div>
     </div>
   </div>
   <script type="module" src="/src/main.js"></script>

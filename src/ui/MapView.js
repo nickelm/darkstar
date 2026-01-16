@@ -17,6 +17,12 @@ export class MapView {
     // Callbacks
     this.onTrackClickCallback = null;
     this.onTrackHoverCallback = null;
+
+    // Track databox reference (set by main.js)
+    this.trackDatabox = null;
+
+    // Hover state
+    this.hoveredTrackId = null;
   }
 
   init(center, zoom) {
@@ -71,6 +77,12 @@ export class MapView {
 
     // Handle clicks on map for track selection (hit-testing)
     this.map.on('click', (e) => this.handleMapClick(e));
+
+    // Handle mouse move for hover detection
+    this.map.on('mousemove', (e) => this.handleMapHover(e));
+
+    // Handle mouse leave to clear hover
+    this.container.addEventListener('mouseleave', () => this.clearHover());
   }
 
   resizeCanvas() {
@@ -350,12 +362,71 @@ export class MapView {
         if (this.onTrackClickCallback) {
           this.onTrackClickCallback(trackData.aircraft);
         }
+
+        // Select (not pin) - show in track panel
+        if (this.trackDatabox) {
+          this.trackDatabox.select(trackData.aircraft);
+        }
         return;
       }
     }
 
     // Click on empty space deselects
     this.selectTrack(null);
+    if (this.trackDatabox) {
+      this.trackDatabox.deselect();
+    }
+  }
+
+  /**
+   * Handle mouse move for track hover detection
+   * @param {Object} event - Leaflet mouse event
+   */
+  handleMapHover(event) {
+    const hoverPoint = this.map.latLngToContainerPoint(event.latlng);
+    const hoverX = hoverPoint.x;
+    const hoverY = hoverPoint.y;
+
+    let foundTrack = null;
+
+    // Find if hover is near any track
+    for (const [id, trackData] of this.tracks) {
+      const pos = trackData.aircraft.getPosition();
+      const point = this.map.latLngToContainerPoint([pos.lat, pos.lon]);
+
+      const dist = Math.sqrt(Math.pow(hoverX - point.x, 2) + Math.pow(hoverY - point.y, 2));
+      if (dist < 25) {
+        foundTrack = { id, aircraft: trackData.aircraft };
+        break;
+      }
+    }
+
+    if (foundTrack) {
+      if (this.hoveredTrackId !== foundTrack.id) {
+        this.hoveredTrackId = foundTrack.id;
+
+        if (this.onTrackHoverCallback) {
+          this.onTrackHoverCallback(foundTrack.aircraft);
+        }
+      }
+    } else if (this.hoveredTrackId) {
+      this.hoveredTrackId = null;
+    }
+  }
+
+  /**
+   * Clear hover state
+   */
+  clearHover() {
+    this.hoveredTrackId = null;
+  }
+
+  /**
+   * Set the track databox reference
+   * @param {TrackDatabox} databox
+   */
+  setTrackDatabox(databox) {
+    this.trackDatabox = databox;
   }
 
   set onTrackClick(callback) {
@@ -374,8 +445,22 @@ export class MapView {
     // Future implementation
   }
 
-  latLonToScreen(lat, lon) {
-    return this.map.latLngToContainerPoint([lat, lon]);
+  /**
+   * Convert lat/lon to screen coordinates
+   * @param {Object|number} latOrObj - Either {lat, lon} object or lat number
+   * @param {number} [lon] - Longitude if first param is lat number
+   * @returns {Object} {x, y} screen coordinates
+   */
+  latLonToScreen(latOrObj, lon) {
+    let lat, lngVal;
+    if (typeof latOrObj === 'object') {
+      lat = latOrObj.lat;
+      lngVal = latOrObj.lon !== undefined ? latOrObj.lon : latOrObj.lng;
+    } else {
+      lat = latOrObj;
+      lngVal = lon;
+    }
+    return this.map.latLngToContainerPoint([lat, lngVal]);
   }
 
   screenToLatLon(x, y) {

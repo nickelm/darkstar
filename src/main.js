@@ -10,6 +10,14 @@ import { CommsLog } from './ui/CommsLog.js';
 import { Subtitles } from './ui/Subtitles.js';
 import { createAudioContext, resumeAudioContext } from './util/audio.js';
 
+// Phase 5a imports
+import { settings } from './util/Settings.js';
+import { StartScreen } from './ui/StartScreen.js';
+import { TopNavbar } from './ui/TopNavbar.js';
+import { SettingsModal } from './ui/SettingsModal.js';
+import { OutboxPanel } from './ui/OutboxPanel.js';
+import { TrackDatabox } from './ui/TrackDatabox.js';
+
 class Darkstar {
   constructor() {
     this.simulation = null;
@@ -28,11 +36,22 @@ class Darkstar {
     this.commsLog = null;
     this.subtitles = null;
 
+    // Phase 5a UI components
+    this.settings = settings;  // Use singleton
+    this.startScreen = null;
+    this.topNavbar = null;
+    this.settingsModal = null;
+    this.outboxPanel = null;
+    this.trackDatabox = null;
+
     this.lastTimestamp = 0;
     this.running = false;
 
     // PTT key state
     this.pttKeyDown = false;
+
+    // Background timer for when tab is hidden
+    this.backgroundTimer = null;
   }
 
   async init() {
@@ -41,12 +60,20 @@ class Darkstar {
     const commandBarContainer = document.getElementById('command-bar');
     const commsLogContainer = document.getElementById('comms-log');
     const subtitlesContainer = document.getElementById('subtitles');
+    const startScreenContainer = document.getElementById('start-screen');
+    const topNavbarContainer = document.getElementById('top-navbar');
+    const settingsModalContainer = document.getElementById('settings-modal');
+    const outboxPanelContainer = document.getElementById('outbox-panel');
+    const trackDataboxContainer = document.getElementById('track-databoxes');
 
     // Create audio context (will be resumed on user interaction)
     this.audioContext = createAudioContext();
 
     // Create simulation
     this.simulation = new Simulation();
+
+    // Apply saved auto-pause settings
+    this.applyAutoPauseSettings();
 
     // Create voice systems
     this.voiceInput = new VoiceInput();
@@ -62,6 +89,13 @@ class Darkstar {
     this.commandBar = new CommandBar(commandBarContainer, this.simulation, this.outbox);
     this.commsLog = new CommsLog(commsLogContainer);
     this.subtitles = new Subtitles(subtitlesContainer);
+
+    // Phase 5a UI components
+    this.startScreen = new StartScreen(startScreenContainer);
+    this.topNavbar = new TopNavbar(topNavbarContainer);
+    this.settingsModal = new SettingsModal(settingsModalContainer, this.settings);
+    this.outboxPanel = new OutboxPanel(outboxPanelContainer, this.outbox);
+    this.trackDatabox = new TrackDatabox(trackDataboxContainer, this.mapView);
 
     // Wire up outbox to voice/comms
     this.outbox.voiceOutput = this.voiceOutput;
@@ -81,11 +115,65 @@ class Darkstar {
     // Wire up command bar to voice input
     this.commandBar.setVoiceInput(this.voiceInput);
 
+    // Wire up map view to track databox
+    this.mapView.setTrackDatabox(this.trackDatabox);
+
     // Set up global keyboard shortcuts
     this.setupKeyboardShortcuts();
 
-    // For Phase 2, skip start screen and load test scenario directly
-    this.startTestScenario();
+    // Initialize settings modal and wire callbacks
+    this.settingsModal.init();
+    this.settingsModal.onVoiceInputChange = (enabled) => {
+      if (this.voiceInput) {
+        this.voiceInput.setEnabled?.(enabled);
+      }
+    };
+    this.settingsModal.onVoiceOutputChange = (enabled, volume) => {
+      if (this.voiceOutput) {
+        this.voiceOutput.setEnabled?.(enabled);
+        this.voiceOutput.setVolume?.(volume);
+      }
+    };
+    this.settingsModal.onAutoPauseChange = (settings) => {
+      this.simulation.setAutoPauseSetting('newContact', settings.newContact);
+      this.simulation.setAutoPauseSetting('missileLaunch', settings.missileLaunch);
+      this.simulation.setAutoPauseSetting('merge', settings.merge);
+      this.simulation.setAutoPauseSetting('bingo', settings.bingo);
+    };
+
+    // Initialize navbar and wire settings button
+    this.topNavbar.init();
+    this.topNavbar.onSettingsClick = () => {
+      this.settingsModal.show();
+    };
+
+    // Initialize start screen and wire callbacks
+    this.startScreen.init();
+    this.startScreen.onStart((scenarioData) => {
+      this.startScenario(scenarioData);
+    });
+    this.startScreen.onSettingsClick = () => {
+      this.settingsModal.show();
+    };
+
+    // Initialize outbox panel
+    this.outboxPanel.init();
+
+    // Initialize track databox
+    this.trackDatabox.init();
+
+    // Show start screen
+    this.startScreen.show();
+  }
+
+  /**
+   * Apply saved auto-pause settings to simulation
+   */
+  applyAutoPauseSettings() {
+    this.simulation.setAutoPauseSetting('newContact', this.settings.get('autoPauseNewContact'));
+    this.simulation.setAutoPauseSetting('missileLaunch', this.settings.get('autoPauseMissileLaunch'));
+    this.simulation.setAutoPauseSetting('merge', this.settings.get('autoPauseMerge'));
+    this.simulation.setAutoPauseSetting('bingo', this.settings.get('autoPauseBingo'));
   }
 
   setupKeyboardShortcuts() {
@@ -115,50 +203,56 @@ class Darkstar {
 
     document.addEventListener('click', resumeAudio, { once: true });
     document.addEventListener('keydown', resumeAudio, { once: true });
+
+    // Handle visibility change to keep simulation running in background
+    document.addEventListener('visibilitychange', () => {
+      if (this.running) {
+        if (document.hidden) {
+          // Tab is hidden - switch to setInterval for background updates
+          this.startBackgroundTimer();
+        } else {
+          // Tab is visible again - switch back to requestAnimationFrame
+          this.stopBackgroundTimer();
+          this.lastTimestamp = performance.now();
+          requestAnimationFrame((ts) => this.gameLoop(ts));
+        }
+      }
+    });
   }
 
-  startTestScenario() {
-    // Phase 3 test scenario with multiple flights and hostiles
-    const testScenario = {
-      name: 'Phase 3 Test',
-      bullseye: { lat: 36.0, lon: -120.0 },
-      flights: [
-        {
-          id: 'viper1',
-          callsign: 'Viper 1',
-          type: 'F-16C',
-          count: 2,
-          position: { lat: 36.2, lon: -120.5 },
-          heading: 90,
-          altitude: 25000,
-          speed: 350
-        },
-        {
-          id: 'cobra1',
-          callsign: 'Cobra 1',
-          type: 'F-15C',
-          count: 2,
-          position: { lat: 35.8, lon: -120.5 },
-          heading: 45,
-          altitude: 30000,
-          speed: 400
-        }
-      ],
-      hostiles: [
-        {
-          id: 'banditAlpha',
-          callsign: 'Bandit Alpha',
-          type: 'MiG-29',
-          count: 2,
-          position: { lat: 36.5, lon: -119.5 },
-          heading: 225,
-          altitude: 25000,
-          speed: 400
-        }
-      ]
-    };
+  /**
+   * Start background timer for simulation updates when tab is hidden
+   */
+  startBackgroundTimer() {
+    if (this.backgroundTimer) return;
 
-    this.startScenario(testScenario);
+    const targetFPS = 10; // Lower update rate when in background
+    const interval = 1000 / targetFPS;
+
+    this.backgroundTimer = setInterval(() => {
+      if (!this.running || !document.hidden) return;
+
+      const now = performance.now();
+      let delta = (now - this.lastTimestamp) / 1000;
+      this.lastTimestamp = now;
+
+      // Cap delta to prevent physics explosion
+      delta = Math.min(delta, 0.1);
+
+      // Update simulation only (no rendering needed when hidden)
+      this.simulation.update(delta);
+      this.outbox.update(delta);
+    }, interval);
+  }
+
+  /**
+   * Stop background timer
+   */
+  stopBackgroundTimer() {
+    if (this.backgroundTimer) {
+      clearInterval(this.backgroundTimer);
+      this.backgroundTimer = null;
+    }
   }
 
   async startScenario(scenarioData) {
@@ -218,8 +312,8 @@ class Darkstar {
     // Initialize command bar
     this.commandBar.init();
 
-    // Show game, hide start screen
-    document.getElementById('start-screen').classList.add('hidden');
+    // Hide start screen, show game
+    this.startScreen.hide();
     document.getElementById('game').classList.remove('hidden');
 
     // Force Leaflet to recalculate container size after showing
@@ -236,6 +330,9 @@ class Darkstar {
   gameLoop(timestamp) {
     if (!this.running) return;
 
+    // Don't run visual loop when hidden (background timer handles simulation)
+    if (document.hidden) return;
+
     // Calculate delta time in seconds
     let delta = (timestamp - this.lastTimestamp) / 1000;
     this.lastTimestamp = timestamp;
@@ -251,6 +348,15 @@ class Darkstar {
 
     // Update subtitles (remove expired)
     this.subtitles.update(delta);
+
+    // Update command bar (time display)
+    this.commandBar.update();
+
+    // Update outbox panel
+    this.outboxPanel.update(delta);
+
+    // Update track databoxes
+    this.trackDatabox.update();
 
     // Render map
     this.mapView.render();
@@ -272,6 +378,27 @@ class Darkstar {
     if (this.voiceOutput) {
       this.voiceOutput.speakAsPilot('Viper 1-1', message);
     }
+  }
+
+  // Add hostile for testing auto-pause
+  addTestHostile() {
+    const hostileData = {
+      id: 'testBandit',
+      callsign: 'Bandit Test',
+      type: 'MiG-29',
+      count: 2,
+      position: { lat: 36.3, lon: -119.8 },
+      heading: 180,
+      altitude: 20000,
+      speed: 400
+    };
+    const flight = this.simulation.createFlight({ ...hostileData, side: 'red' });
+    this.simulation.addHostile(flight);
+    for (const aircraft of flight.aircraft) {
+      this.mapView.addTrack(aircraft);
+    }
+    this.commandParser.setTargets(this.simulation.hostiles.map(f => f.callsign));
+    console.log('Added test hostile:', flight.callsign);
   }
 }
 

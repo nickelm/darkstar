@@ -3,6 +3,7 @@ import { Flight } from './Flight.js';
 import { Aircraft } from './Aircraft.js';
 import { PilotAI } from '../ai/PilotAI.js';
 import { EnemyAI } from '../ai/EnemyAI.js';
+import { EventEmitter } from '../util/EventEmitter.js';
 // Combat and WaveManager commented out for Phase 2
 // import { Airbase } from './Airbase.js';
 // import { Combat } from './Combat.js';
@@ -14,8 +15,14 @@ const BANDIT_LETTERS = [
   'Golf', 'Hotel', 'India', 'Juliet', 'Kilo', 'Lima'
 ];
 
+// Distance in meters for merge detection (~5nm)
+const MERGE_DISTANCE = 9260;
+
 export class Simulation {
   constructor() {
+    // Event emitter for game events
+    this.events = new EventEmitter();
+
     this.time = 0;
     this.speed = 1; // 1, 2, 4
     this.paused = false;
@@ -28,6 +35,19 @@ export class Simulation {
 
     this.bullseye = { lat: 0, lon: 0 };
     this.banditCounter = 0; // For assigning Bandit IDs
+
+    // Auto-pause settings
+    this.autoPauseSettings = {
+      newContact: true,
+      missileLaunch: true,
+      merge: true,
+      bingo: false
+    };
+
+    // Track previous state for detecting changes
+    this.previousHostileCount = 0;
+    this.mergeAnnounced = new Set(); // Track pairs that have merged
+    this.autoPauseReason = null; // Last auto-pause reason
 
     // Commented out for Phase 2
     // this.combat = new Combat(this);
@@ -62,6 +82,11 @@ export class Simulation {
 
     this.time = 0;
     this.paused = false;
+
+    // Reset auto-pause tracking state
+    this.previousHostileCount = this.hostiles.reduce((sum, f) => sum + f.aircraft.length, 0);
+    this.mergeAnnounced.clear();
+    this.autoPauseReason = null;
   }
 
   /**
@@ -148,6 +173,93 @@ export class Simulation {
         aircraft.update(scaledDelta);
       }
     }
+
+    // Check auto-pause triggers
+    this.checkAutoPauseTriggers();
+  }
+
+  /**
+   * Check for conditions that should trigger auto-pause
+   */
+  checkAutoPauseTriggers() {
+    // New contact detection
+    if (this.autoPauseSettings.newContact) {
+      const currentCount = this.hostiles.reduce((sum, f) => sum + f.aircraft.length, 0);
+      if (currentCount > this.previousHostileCount && this.previousHostileCount > 0) {
+        const newCount = currentCount - this.previousHostileCount;
+        this.events.emit('contact:new', { count: newCount });
+        this.triggerAutoPause(`New hostile contact detected`);
+      }
+      this.previousHostileCount = currentCount;
+    }
+
+    // Bingo fuel detection (for friendly aircraft)
+    if (this.autoPauseSettings.bingo) {
+      for (const flight of this.flights) {
+        for (const aircraft of flight.aircraft) {
+          if (aircraft.isBingoFuel && aircraft.isBingoFuel() && !aircraft._bingoAnnounced) {
+            aircraft._bingoAnnounced = true;
+            this.events.emit('bingo', { aircraft });
+            this.triggerAutoPause(`${aircraft.callsign} is BINGO fuel`);
+          }
+        }
+      }
+    }
+
+    // Merge detection - when friendly and hostile < 5nm apart
+    if (this.autoPauseSettings.merge) {
+      for (const friendlyFlight of this.flights) {
+        for (const friendly of friendlyFlight.aircraft) {
+          for (const hostileFlight of this.hostiles) {
+            for (const hostile of hostileFlight.aircraft) {
+              const pairKey = `${friendly.id}:${hostile.id}`;
+              if (this.mergeAnnounced.has(pairKey)) continue;
+
+              const dx = friendly.position.x - hostile.position.x;
+              const dy = friendly.position.y - hostile.position.y;
+              const distance = Math.sqrt(dx * dx + dy * dy);
+
+              if (distance < MERGE_DISTANCE) {
+                this.mergeAnnounced.add(pairKey);
+                this.events.emit('merge', { friendly, hostile, distance });
+                this.triggerAutoPause(`MERGE: ${friendly.callsign} and ${hostile.flight?.callsign || 'hostile'}`);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Trigger auto-pause with a reason
+   * @param {string} reason
+   */
+  triggerAutoPause(reason) {
+    if (!this.paused) {
+      this.paused = true;
+      this.autoPauseReason = reason;
+      this.events.emit('autopause', { reason });
+    }
+  }
+
+  /**
+   * Set an auto-pause setting
+   * @param {string} key - 'newContact', 'missileLaunch', 'merge', 'bingo'
+   * @param {boolean} value
+   */
+  setAutoPauseSetting(key, value) {
+    if (key in this.autoPauseSettings) {
+      this.autoPauseSettings[key] = value;
+    }
+  }
+
+  /**
+   * Get all auto-pause settings
+   * @returns {Object}
+   */
+  getAutoPauseSettings() {
+    return { ...this.autoPauseSettings };
   }
 
   addFlight(flight) {
