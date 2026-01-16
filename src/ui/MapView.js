@@ -20,11 +20,14 @@ export class MapView {
   }
 
   init(center, zoom) {
-    // Initialize Leaflet map
+    // Initialize Leaflet map with touch support
     this.map = L.map(this.container, {
       center: [center.lat, center.lon],
       zoom: zoom || 8,
-      zoomControl: true
+      zoomControl: true,
+      tap: true,
+      touchZoom: true,
+      dragging: true
     });
 
     // Add dark tile layer (CartoDB Dark Matter)
@@ -49,7 +52,7 @@ export class MapView {
     this.canvasEl.style.position = 'absolute';
     this.canvasEl.style.top = '0';
     this.canvasEl.style.left = '0';
-    this.canvasEl.style.pointerEvents = 'auto';
+    this.canvasEl.style.pointerEvents = 'none'; // Let touches pass through to Leaflet
     this.canvasEl.style.zIndex = '400'; // Above tiles, below controls
 
     this.map.getPane('overlayPane').appendChild(this.canvasEl);
@@ -66,8 +69,8 @@ export class MapView {
       this.render();
     });
 
-    // Handle clicks on canvas
-    this.canvasEl.addEventListener('click', (e) => this.handleCanvasClick(e));
+    // Handle clicks on map for track selection (hit-testing)
+    this.map.on('click', (e) => this.handleMapClick(e));
   }
 
   resizeCanvas() {
@@ -330,12 +333,13 @@ export class MapView {
     // Future implementation
   }
 
-  handleCanvasClick(event) {
-    const rect = this.canvasEl.getBoundingClientRect();
-    const clickX = event.clientX - rect.left;
-    const clickY = event.clientY - rect.top;
+  handleMapClick(event) {
+    // Get click position in container coordinates
+    const clickPoint = this.map.latLngToContainerPoint(event.latlng);
+    const clickX = clickPoint.x;
+    const clickY = clickPoint.y;
 
-    // Find if click is near any track
+    // Find if click is near any track (hit-testing)
     for (const [id, trackData] of this.tracks) {
       const pos = trackData.aircraft.getPosition();
       const point = this.map.latLngToContainerPoint([pos.lat, pos.lon]);
