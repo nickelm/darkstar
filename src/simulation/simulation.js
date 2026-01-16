@@ -322,7 +322,8 @@ export class Simulation {
 
     for (const flight of this.flights) {
       const flightNorm = flight.callsign.toLowerCase().replace(/[- ]/g, '');
-      if (flightNorm === normalized || normalized.startsWith(flightNorm)) {
+      // Exact match only - no prefix matching (element callsigns handled separately)
+      if (flightNorm === normalized) {
         return flight;
       }
     }
@@ -330,12 +331,50 @@ export class Simulation {
     // Also check hostiles
     for (const flight of this.hostiles) {
       const flightNorm = flight.callsign.toLowerCase().replace(/[- ]/g, '');
-      if (flightNorm === normalized || normalized.startsWith(flightNorm)) {
+      if (flightNorm === normalized) {
         return flight;
       }
     }
 
     return null;
+  }
+
+  /**
+   * Get a specific aircraft by element callsign (e.g., "Viper 1-1")
+   * @param {string} callsign - Element callsign
+   * @returns {Aircraft|null}
+   */
+  getAircraftByCallsign(callsign) {
+    const normalized = callsign.toLowerCase().replace(/[- ]/g, '');
+
+    for (const flight of this.flights) {
+      for (const aircraft of flight.aircraft) {
+        const acNorm = aircraft.callsign.toLowerCase().replace(/[- ]/g, '');
+        if (acNorm === normalized) {
+          return aircraft;
+        }
+      }
+    }
+
+    // Also check hostiles
+    for (const flight of this.hostiles) {
+      for (const aircraft of flight.aircraft) {
+        const acNorm = aircraft.callsign.toLowerCase().replace(/[- ]/g, '');
+        if (acNorm === normalized) {
+          return aircraft;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Get all friendly flights (for broadcast commands)
+   * @returns {Flight[]}
+   */
+  getAllFriendlyFlights() {
+    return [...this.flights];
   }
 
   getAllAircraft() {

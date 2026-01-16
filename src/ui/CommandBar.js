@@ -12,6 +12,7 @@ export class CommandBar {
     this.selectedCallsign = null;
     this.selectedCommand = null;
     this.selectedParams = {};
+    this.selectedScope = 'flight';  // 'flight' | 'element' | 'broadcast'
 
     this.elements = {};
 
@@ -131,13 +132,38 @@ export class CommandBar {
 
   openCallsignMenu(sortByPosition = null) {
     const flights = this.simulation.flights;
-    const options = flights.map(f => ({
-      value: f.callsign,
-      label: f.callsign
-    }));
+    const options = [];
 
-    this.showDropdown(this.elements.callsignSlot, options, (value) => {
-      this.selectCallsign(value);
+    // Add "99" broadcast option at the top
+    options.push({
+      value: '99',
+      label: '99 (All Aircraft)',
+      scope: 'broadcast'
+    });
+
+    // Add flights and their elements
+    for (const flight of flights) {
+      // Flight-level option
+      options.push({
+        value: flight.callsign,
+        label: `${flight.callsign} (Flight)`,
+        scope: 'flight'
+      });
+
+      // Element-level options
+      for (const aircraft of flight.aircraft) {
+        const isLead = aircraft === flight.lead;
+        const elementLabel = isLead ? `  └ ${aircraft.callsign} (Lead)` : `  └ ${aircraft.callsign}`;
+        options.push({
+          value: aircraft.callsign,
+          label: elementLabel,
+          scope: 'element'
+        });
+      }
+    }
+
+    this.showDropdownWithScope(this.elements.callsignSlot, options, (value, scope) => {
+      this.selectCallsign(value, scope);
     });
   }
 
@@ -259,8 +285,9 @@ export class CommandBar {
     });
   }
 
-  selectCallsign(callsign) {
+  selectCallsign(callsign, scope = 'flight') {
     this.selectedCallsign = callsign;
+    this.selectedScope = scope;
     this.elements.callsignSlot.querySelector('.slot-value').textContent = callsign;
     this.state = 'callsign';
     this.hideDropdown();
@@ -294,11 +321,12 @@ export class CommandBar {
   send() {
     if (this.state !== 'ready') return;
 
-    // Create command object
+    // Create command object with scope
     const command = new Command(
       this.selectedCallsign,
       this.selectedCommand,
-      { ...this.selectedParams }
+      { ...this.selectedParams },
+      this.selectedScope
     );
 
     // Add to outbox with 3-second hold (voice commands bypass this)
@@ -312,6 +340,7 @@ export class CommandBar {
     this.selectedCallsign = null;
     this.selectedCommand = null;
     this.selectedParams = {};
+    this.selectedScope = 'flight';
     this.state = 'idle';
 
     this.elements.callsignSlot.querySelector('.slot-value').textContent = '-';
@@ -343,6 +372,34 @@ export class CommandBar {
     items.forEach(item => {
       item.addEventListener('click', () => {
         onSelect(item.dataset.value);
+      });
+    });
+
+    this.positionDropdown(anchor);
+    this.elements.dropdown.classList.remove('hidden');
+  }
+
+  /**
+   * Show dropdown with scope support for callsign selection
+   * @param {HTMLElement} anchor
+   * @param {Array} options - Array of { value, label, scope }
+   * @param {Function} onSelect - Callback(value, scope)
+   */
+  showDropdownWithScope(anchor, options, onSelect) {
+    let html = '<ul class="dropdown-list">';
+    for (const opt of options) {
+      const scopeClass = opt.scope === 'element' ? 'dropdown-element' : opt.scope === 'broadcast' ? 'dropdown-broadcast' : 'dropdown-flight';
+      html += `<li data-value="${opt.value}" data-scope="${opt.scope}" class="${scopeClass}">${opt.label}</li>`;
+    }
+    html += '</ul>';
+
+    this.elements.dropdown.innerHTML = html;
+
+    // Bind click events
+    const items = this.elements.dropdown.querySelectorAll('li');
+    items.forEach(item => {
+      item.addEventListener('click', () => {
+        onSelect(item.dataset.value, item.dataset.scope);
       });
     });
 

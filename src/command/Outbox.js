@@ -77,16 +77,44 @@ export class Outbox {
     entry.command.timestamp = Date.now();
 
     const command = entry.command;
+    const scope = command.scope || 'flight';
 
-    // Get flight for context
-    const flight = this.simulation?.getFlightByCallsign(command.callsign);
+    // Determine display callsign and acknowledging entity based on scope
+    let displayCallsign = command.callsign;
+    let acknowledger = null;
+    let flight = null;
+
+    if (scope === 'element') {
+      // Element scope: the specific aircraft acknowledges
+      const aircraft = this.simulation?.getAircraftByCallsign(command.callsign);
+      if (aircraft) {
+        acknowledger = aircraft;
+        flight = aircraft.flight;
+        displayCallsign = command.callsign;
+      }
+    } else if (scope === 'broadcast') {
+      // Broadcast: first flight lead acknowledges with "All aircraft copy"
+      const flights = this.simulation?.getAllFriendlyFlights();
+      if (flights && flights.length > 0) {
+        flight = flights[0];
+        acknowledger = flight.lead;
+        displayCallsign = 'All aircraft';
+      }
+    } else {
+      // Flight scope: flight lead acknowledges
+      flight = this.simulation?.getFlightByCallsign(command.callsign);
+      if (flight) {
+        acknowledger = flight.lead;
+        displayCallsign = command.callsign;
+      }
+    }
 
     // Generate GCI command message for logging
     const gciMessage = this.generateGciMessage(command);
 
     // Log player command to comms log
     if (this.commsLog && gciMessage) {
-      this.commsLog.logGciCommand(command.callsign, gciMessage);
+      this.commsLog.logGciCommand(displayCallsign, gciMessage);
     }
 
     // Speak GCI command (only for non-voice commands, i.e., from command bar)
@@ -95,7 +123,7 @@ export class Outbox {
     const skipVoice = this.subtitles ? this.subtitles.shouldSkipVoice() : false;
     if (shouldSpeakGci && !skipVoice) {
       // Format the full GCI transmission: "[Callsign], [command]"
-      const gciTransmission = `${command.callsign}, ${gciMessage}`;
+      const gciTransmission = `${displayCallsign}, ${gciMessage}`;
       this.voiceOutput.speakAsGCI(gciTransmission);
     }
 
@@ -103,9 +131,9 @@ export class Outbox {
     const success = this.executor.execute(command);
 
     // Generate and play pilot acknowledgment
-    if (success && flight) {
-      const pilotCallsign = flight.lead?.callsign || `${flight.callsign}-1`;
-      const ackMessage = VoiceOutput.generateAcknowledgment(command, pilotCallsign);
+    if (success && acknowledger) {
+      const pilotCallsign = acknowledger.callsign;
+      const ackMessage = this.generateAcknowledgment(command, pilotCallsign, scope);
 
       // Log pilot response to comms log
       if (this.commsLog) {
@@ -123,6 +151,24 @@ export class Outbox {
         this.voiceOutput.speakAsPilot(pilotCallsign, ackMessage);
       }
     }
+  }
+
+  /**
+   * Generate pilot acknowledgment message based on command scope
+   * @param {Object} command
+   * @param {string} pilotCallsign
+   * @param {string} scope - "flight" | "element" | "broadcast"
+   * @returns {string}
+   */
+  generateAcknowledgment(command, pilotCallsign, scope) {
+    if (scope === 'broadcast') {
+      // Special acknowledgment for broadcast commands
+      const cmdLower = command.type.toLowerCase().replace('_', ' ');
+      return `Copy all, ${cmdLower}`;
+    }
+
+    // Use VoiceOutput's standard acknowledgment generator
+    return VoiceOutput.generateAcknowledgment(command, pilotCallsign);
   }
 
   /**

@@ -270,11 +270,22 @@ class Darkstar {
     // Load scenario into simulation
     this.simulation.loadScenario(scenarioData);
 
-    // Update parser with known callsigns and targets
-    const callsigns = this.simulation.flights.map(f => f.callsign);
+    // Build flight registration data with elements and aliases
+    const flightRegistrations = this.simulation.flights.map(flight => ({
+      callsign: flight.callsign,
+      elements: flight.aircraft.map(ac => ac.callsign),
+      aliases: this.generateFlightAliases(flight)
+    }));
+
+    // Register flights with parser (new method with full element support)
+    this.commandParser.registerFlights(flightRegistrations);
+
+    // Also set targets for hostile recognition
     const targets = this.simulation.hostiles.map(f => f.callsign);
-    this.commandParser.setCallsigns(callsigns);
     this.commandParser.setTargets(targets);
+
+    // Keep callsigns array for UI components
+    const callsigns = this.simulation.flights.map(f => f.callsign);
 
     // Initialize voice systems
     this.voiceInput.init();
@@ -390,6 +401,43 @@ class Darkstar {
     if (this.voiceOutput) {
       this.voiceOutput.speakAsPilot('Viper 1-1', message);
     }
+  }
+
+  /**
+   * Generate common aliases for a flight based on common voice transcription errors
+   * @param {Flight} flight
+   * @returns {string[]}
+   */
+  generateFlightAliases(flight) {
+    const aliases = [];
+    const callsign = flight.callsign;
+
+    // Common mistranscriptions based on flight name
+    const mistranscriptions = {
+      'viper': ['wiper', 'vipor', 'vyper'],
+      'eagle': ['ego', 'egal', 'eagel'],
+      'hornet': ['hornit', 'hornat'],
+      'tiger': ['tagger', 'tyger'],
+      'cobra': ['copra', 'cobro'],
+      'falcon': ['falkon', 'faulcon'],
+      'hawk': ['hock', 'hauk'],
+      'raptor': ['rapper', 'rapter']
+    };
+
+    const match = callsign.match(/^([A-Za-z]+)\s*(\d+)$/);
+    if (match) {
+      const word = match[1].toLowerCase();
+      const num = match[2];
+
+      // Add mistranscriptions if known
+      if (mistranscriptions[word]) {
+        for (const wrong of mistranscriptions[word]) {
+          aliases.push(`${wrong} ${num}`);
+        }
+      }
+    }
+
+    return aliases;
   }
 
   // Add hostile for testing auto-pause

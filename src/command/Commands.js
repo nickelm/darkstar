@@ -83,12 +83,19 @@ export const COMMANDS = {
 };
 
 export class Command {
-  constructor(callsign, commandType, params = {}) {
+  /**
+   * @param {string} callsign - The callsign (flight or element)
+   * @param {string} commandType - The command type (SNAP, VECTOR, etc.)
+   * @param {Object} params - Command parameters
+   * @param {string} scope - "flight" | "element" | "broadcast"
+   */
+  constructor(callsign, commandType, params = {}, scope = 'flight') {
     this.id = Date.now() + Math.random();
     this.callsign = callsign;
     this.type = commandType;
     this.params = params;
     this.timestamp = null;
+    this.scope = scope;  // "flight" | "element" | "broadcast"
   }
 
   toString() {
