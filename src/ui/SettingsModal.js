@@ -14,6 +14,7 @@ export class SettingsModal {
     this.onVoiceOutputChange = null;
     this.onAutoPauseChange = null;
     this.onDifficultyChange = null;
+    this.onTrackSymbologyChange = null;
 
     // DOM element references
     this.overlay = null;
@@ -95,6 +96,18 @@ export class SettingsModal {
                   <span>Hard</span>
                   <small>Aggressive enemies, realistic constraints</small>
                 </label>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <h3>Display</h3>
+              <div class="settings-select">
+                <label for="setting-track-symbology">Track Symbology</label>
+                <select id="setting-track-symbology">
+                  <option value="nato">NATO Symbols</option>
+                  <option value="silhouette">Aircraft Silhouettes</option>
+                  <option value="hybrid">Hybrid (NATO + Silhouette)</option>
+                </select>
               </div>
             </div>
 
@@ -211,6 +224,10 @@ export class SettingsModal {
     const difficulty = s.get('difficulty');
     const radioBtn = this.container.querySelector(`input[name="difficulty"][value="${difficulty}"]`);
     if (radioBtn) radioBtn.checked = true;
+
+    // Track symbology
+    const trackSymbology = s.get('trackSymbology');
+    this.container.querySelector('#setting-track-symbology').value = trackSymbology;
   }
 
   /**
@@ -255,6 +272,13 @@ export class SettingsModal {
     s.set('difficulty', difficulty);
     if (this.onDifficultyChange) {
       this.onDifficultyChange(difficulty);
+    }
+
+    // Track symbology
+    const trackSymbology = this.container.querySelector('#setting-track-symbology').value;
+    s.set('trackSymbology', trackSymbology);
+    if (this.onTrackSymbologyChange) {
+      this.onTrackSymbologyChange(trackSymbology);
     }
 
     this.hide();

@@ -1,4 +1,7 @@
 import L from 'leaflet';
+import { iconLoader } from './IconLoader.js';
+import { settings } from '../util/Settings.js';
+import { AIRCRAFT } from '../data/aircraft.js';
 
 export class MapView {
   constructor(container) {
@@ -26,6 +29,15 @@ export class MapView {
 
     // Combat system reference (set by main.js)
     this.simulation = null;
+
+    // Track display mode
+    this.trackSymbology = settings.get('trackSymbology');
+
+    // Listen for settings changes
+    settings.onChange('trackSymbology', (value) => {
+      this.trackSymbology = value;
+      this.render();
+    });
   }
 
   init(center, zoom) {
@@ -247,16 +259,85 @@ export class MapView {
       ctx.lineWidth = 2;
     }
 
-    // Draw symbol based on side (wedge for friendly, diamond for hostile)
+    // Get aircraft data for icon lookup
+    const aircraftData = AIRCRAFT[aircraft.type];
+    const iconKey = aircraftData?.iconKey;
+    const mode = this.trackSymbology;
+
+    // Draw symbol based on display mode
+    if ((mode === 'silhouette' || mode === 'hybrid') && iconKey && iconLoader.hasIcon(iconKey)) {
+      this.drawSilhouette(ctx, point, aircraft, iconKey, color, isSelected);
+    } else {
+      // NATO mode or fallback if icon missing
+      this.drawNATOSymbol(ctx, point, aircraft, color, isSelected);
+    }
+
+    // Draw velocity vector (heading line)
+    this.drawVelocityVector(ctx, point, aircraft, color);
+
+    // Draw data block
+    this.drawDataBlock(ctx, point.x, point.y, aircraft);
+
+    ctx.restore();
+  }
+
+  /**
+   * Draw aircraft silhouette icon
+   */
+  drawSilhouette(ctx, point, aircraft, iconKey, color, isSelected) {
+    const icon = iconLoader.getIcon(iconKey, aircraft.side);
+    if (!icon) {
+      // Fallback to NATO symbol if icon not loaded
+      this.drawNATOSymbol(ctx, point, aircraft, color, isSelected);
+      return;
+    }
+
+    const size = isSelected ? 28 : 24;
+    const headingRad = aircraft.heading * Math.PI / 180;
+
+    ctx.save();
+    ctx.translate(point.x, point.y);
+    ctx.rotate(headingRad);
+
+    // Draw icon centered
+    ctx.drawImage(icon, -size / 2, -size / 2, size, size);
+
+    // Selection highlight
+    if (isSelected) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, size / 2 + 4, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  /**
+   * Draw NATO symbol (wrapper for existing methods)
+   */
+  drawNATOSymbol(ctx, point, aircraft, color, isSelected) {
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = isSelected ? 3 : 2;
+
     if (aircraft.side === 'red') {
       this.drawNATOHostileSymbol(ctx, point.x, point.y, aircraft.heading, color);
     } else {
       this.drawNATOFighterSymbol(ctx, point.x, point.y, aircraft.heading, color);
     }
+  }
 
-    // Draw velocity vector (heading line)
+  /**
+   * Draw velocity vector (heading line)
+   */
+  drawVelocityVector(ctx, point, aircraft, color) {
     const vecLength = 30;
     const headingRad = aircraft.heading * Math.PI / 180;
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(point.x, point.y);
     ctx.lineTo(
@@ -264,11 +345,6 @@ export class MapView {
       point.y - vecLength * Math.cos(headingRad)
     );
     ctx.stroke();
-
-    // Draw data block
-    this.drawDataBlock(ctx, point.x, point.y, aircraft);
-
-    ctx.restore();
   }
 
   drawNATOFighterSymbol(ctx, x, y, heading, color) {

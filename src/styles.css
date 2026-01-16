@@ -1440,6 +1440,39 @@ html, body {
   margin-top: 2px;
 }
 
+.settings-select {
+  display: flex;
+  align-items: center;
+  margin: 10px 0;
+}
+
+.settings-select label {
+  color: #888;
+  font-size: 12px;
+  margin-right: 10px;
+  min-width: 120px;
+}
+
+.settings-select select {
+  flex: 1;
+  background: #252540;
+  border: 1px solid #444;
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-select select:hover {
+  border-color: #4CAF50;
+}
+
+.settings-select select:focus {
+  outline: none;
+  border-color: #4CAF50;
+}
+
 .settings-footer {
   display: flex;
   justify-content: space-between;

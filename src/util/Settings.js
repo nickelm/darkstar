@@ -13,7 +13,8 @@ const DEFAULTS = {
   autoPauseMissileLaunch: true,
   autoPauseMerge: true,
   autoPauseBingo: false,
-  difficulty: 'normal'  // 'easy', 'normal', 'hard'
+  difficulty: 'normal',  // 'easy', 'normal', 'hard'
+  trackSymbology: 'nato' // 'silhouette', 'nato', 'hybrid'
 };
 
 export class Settings {

@@ -17,6 +17,7 @@ import { TopNavbar } from './ui/TopNavbar.js';
 import { SettingsModal } from './ui/SettingsModal.js';
 import { OutboxPanel } from './ui/OutboxPanel.js';
 import { TrackDatabox } from './ui/TrackDatabox.js';
+import { iconLoader } from './ui/IconLoader.js';
 
 class Darkstar {
   constructor() {
@@ -270,6 +271,9 @@ class Darkstar {
   }
 
   async startScenario(scenarioData) {
+    // Preload aircraft icons
+    await iconLoader.preloadAll();
+
     // Load scenario into simulation
     this.simulation.loadScenario(scenarioData);
 

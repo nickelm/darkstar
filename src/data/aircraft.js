@@ -1,6 +1,27 @@
+// Icon path mappings for aircraft silhouettes
+export const AIRCRAFT_ICONS = {
+  'F-14': '/icons/aircraft/F-14.svg',
+  'F-15': '/icons/aircraft/F-15.svg',
+  'F-16': '/icons/aircraft/F-16.svg',
+  'FA-18': '/icons/aircraft/FA-18.svg',
+  'MiG-21': '/icons/aircraft/MiG-21.svg',
+  'MiG-23': '/icons/aircraft/MiG-23.svg',
+  'MiG-25': '/icons/aircraft/MiG-25.svg',
+  'MiG-29': '/icons/aircraft/MiG-29.svg',
+  'MiG-31': '/icons/aircraft/MiG-31.svg',
+  'Su-24': '/icons/aircraft/Su-24.svg',
+  'Su-25': '/icons/aircraft/Su-25.svg',
+  'Su-27': '/icons/aircraft/Su-27.svg',
+};
+
+export const GENERAL_ICONS = {
+  'parachute': '/icons/general/parachute.svg',
+};
+
 export const AIRCRAFT = {
   'F-15C': {
     name: 'Eagle',
+    iconKey: 'F-15',
     side: 'blue',
     role: 'fighter',
     speed: { cruise: 450, max: 1400 },
@@ -17,6 +38,7 @@ export const AIRCRAFT = {
   },
   'F-16C': {
     name: 'Viper',
+    iconKey: 'F-16',
     side: 'blue',
     role: 'fighter',
     speed: { cruise: 450, max: 1200 },
@@ -32,6 +54,7 @@ export const AIRCRAFT = {
   },
   'F-14D': {
     name: 'Tomcat',
+    iconKey: 'F-14',
     side: 'blue',
     role: 'fighter',
     speed: { cruise: 400, max: 1300 },
@@ -48,6 +71,7 @@ export const AIRCRAFT = {
   },
   'F/A-18C': {
     name: 'Hornet',
+    iconKey: 'FA-18',
     side: 'blue',
     role: 'fighter',
     speed: { cruise: 400, max: 1050 },
@@ -64,6 +88,7 @@ export const AIRCRAFT = {
   },
   'MiG-29': {
     name: 'Fulcrum',
+    iconKey: 'MiG-29',
     side: 'red',
     role: 'fighter',
     speed: { cruise: 400, max: 1300 },
@@ -80,6 +105,7 @@ export const AIRCRAFT = {
   },
   'Su-27': {
     name: 'Flanker',
+    iconKey: 'Su-27',
     side: 'red',
     role: 'fighter',
     speed: { cruise: 450, max: 1350 },
@@ -96,6 +122,7 @@ export const AIRCRAFT = {
   },
   'Su-24': {
     name: 'Fencer',
+    iconKey: 'Su-24',
     side: 'red',
     role: 'strike',
     speed: { cruise: 400, max: 1100 },
@@ -110,6 +137,7 @@ export const AIRCRAFT = {
   },
   'MiG-21': {
     name: 'Fishbed',
+    iconKey: 'MiG-21',
     side: 'red',
     role: 'fighter',
     speed: { cruise: 350, max: 1100 },
