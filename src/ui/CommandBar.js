@@ -24,6 +24,7 @@ export class CommandBar {
   init() {
     this.render();
     this.bindEvents();
+    this.bindScrollIndicators();
   }
 
   render() {
@@ -454,5 +455,44 @@ export class CommandBar {
     this.elements.pttBtn.addEventListener('touchend', () => {
       this.stopPtt();
     });
+  }
+
+  /**
+   * Bind scroll indicators for command bar horizontal scrolling
+   */
+  bindScrollIndicators() {
+    // Create fade indicator elements and append to parent (#game)
+    const parent = this.container.parentElement;
+    if (!parent) return;
+
+    this.fadeLeft = document.createElement('div');
+    this.fadeLeft.className = 'cmd-scroll-fade cmd-scroll-fade-left';
+    parent.appendChild(this.fadeLeft);
+
+    this.fadeRight = document.createElement('div');
+    this.fadeRight.className = 'cmd-scroll-fade cmd-scroll-fade-right';
+    parent.appendChild(this.fadeRight);
+
+    const updateScrollIndicators = () => {
+      const container = this.container;
+      const scrollLeft = container.scrollLeft;
+      const scrollWidth = container.scrollWidth;
+      const clientWidth = container.clientWidth;
+
+      // Show left fade if scrolled away from start
+      this.fadeLeft.classList.toggle('visible', scrollLeft > 5);
+
+      // Show right fade if more content to scroll
+      this.fadeRight.classList.toggle('visible', scrollLeft < scrollWidth - clientWidth - 5);
+    };
+
+    // Update on scroll
+    this.container.addEventListener('scroll', updateScrollIndicators);
+
+    // Initial check (after a small delay to ensure layout is complete)
+    requestAnimationFrame(updateScrollIndicators);
+
+    // Re-check on resize
+    window.addEventListener('resize', updateScrollIndicators);
   }
 }

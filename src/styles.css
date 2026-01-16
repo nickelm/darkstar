@@ -12,6 +12,12 @@ html, body, #app {
   color: #eee;
 }
 
+/* Prevent body overscroll on mobile */
+html, body {
+  position: fixed;
+  overscroll-behavior: none;
+}
+
 /* Game container */
 #game {
   position: relative;
@@ -27,11 +33,12 @@ html, body, #app {
   right: 200px;
   bottom: 60px;
   background: #1a1a2e;
+  touch-action: none;
 }
 
 /* Canvas overlay for tracks */
 .track-canvas {
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 /* Command bar at bottom */
@@ -47,6 +54,43 @@ html, body, #app {
   align-items: center;
   padding: 0 10px;
   box-sizing: border-box;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Hide scrollbar - Firefox */
+  scrollbar-width: none;
+  /* Hide scrollbar - IE/Edge */
+  -ms-overflow-style: none;
+}
+
+/* Hide scrollbar - Chrome/Safari/Opera */
+#command-bar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Command bar scroll fade indicators (positioned relative to #game) */
+.cmd-scroll-fade {
+  position: absolute;
+  bottom: 0;
+  height: 60px;
+  width: 20px;
+  pointer-events: none;
+  z-index: 150;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.cmd-scroll-fade-left {
+  left: 0;
+  background: linear-gradient(to right, #1a1a2e, transparent);
+}
+
+.cmd-scroll-fade-right {
+  right: 200px;
+  background: linear-gradient(to left, #1a1a2e, transparent);
+}
+
+.cmd-scroll-fade.visible {
+  opacity: 1;
 }
 
 /* Side panel */
