@@ -24,6 +24,15 @@ export class Aircraft {
     // Weapons
     this.weapons = [];
 
+    // Combat state
+    this.weaponsAuthorization = 'hold';  // 'hold' | 'free'
+    this.engagementPhase = 'none';       // 'none' | 'detected' | 'committed' | 'launching' | 'guiding' | 'cranking' | 'notching' | 'merged'
+    this.missilesInFlight = [];          // Missiles we've launched
+    this.inboundThreats = [];            // Missiles targeting us
+
+    // Initialize weapon inventory from aircraft data
+    this.weaponInventory = this.initWeaponInventory(config.type);
+
     // Control
     this.headingPID = null;
     this.altitudePID = null;
@@ -194,6 +203,52 @@ export class Aircraft {
   }
 
   isWinchester() {
-    return this.weapons.length === 0;
+    // Check if all weapon counts are zero
+    if (!this.weaponInventory) return true;
+    return Object.values(this.weaponInventory).every(w => w.count === 0);
+  }
+
+  /**
+   * Initialize weapon inventory from aircraft type data
+   */
+  initWeaponInventory(type) {
+    const aircraftData = AIRCRAFT[type];
+    if (!aircraftData || !aircraftData.weapons) {
+      return { fox3: { type: null, count: 0 }, fox1: { type: null, count: 0 }, fox2: { type: null, count: 0 } };
+    }
+
+    const weapons = aircraftData.weapons;
+    return {
+      fox3: weapons.fox3 ? { type: weapons.fox3.type, count: weapons.fox3.count } : { type: null, count: 0 },
+      fox1: weapons.fox1 ? { type: weapons.fox1.type, count: weapons.fox1.count } : { type: null, count: 0 },
+      fox2: weapons.fox2 ? { type: weapons.fox2.type, count: weapons.fox2.count } : { type: null, count: 0 }
+    };
+  }
+
+  /**
+   * Check if aircraft has weapons of a specific category
+   */
+  hasWeapon(category) {
+    return this.weaponInventory[category] && this.weaponInventory[category].count > 0;
+  }
+
+  /**
+   * Consume a weapon from inventory
+   * @returns {string|null} The weapon type consumed, or null if none available
+   */
+  consumeWeapon(category) {
+    if (!this.hasWeapon(category)) return null;
+    this.weaponInventory[category].count--;
+    return this.weaponInventory[category].type;
+  }
+
+  /**
+   * Get the best available weapon for BVR engagement
+   * Prefers fox3, then fox1
+   */
+  getBestBVRWeapon() {
+    if (this.hasWeapon('fox3')) return 'fox3';
+    if (this.hasWeapon('fox1')) return 'fox1';
+    return null;
   }
 }

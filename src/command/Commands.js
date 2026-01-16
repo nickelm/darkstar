@@ -79,6 +79,16 @@ export const COMMANDS = {
     name: 'SCRAMBLE',
     params: ['flight'],
     description: 'Launch alert fighters'
+  },
+  EXTEND: {
+    name: 'EXTEND',
+    params: [],
+    description: 'Disengage from merge'
+  },
+  PRESS: {
+    name: 'PRESS',
+    params: [],
+    description: 'Stay aggressive in merge'
   }
 };
 

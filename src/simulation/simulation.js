@@ -4,9 +4,9 @@ import { Aircraft } from './Aircraft.js';
 import { PilotAI } from '../ai/PilotAI.js';
 import { EnemyAI } from '../ai/EnemyAI.js';
 import { EventEmitter } from '../util/EventEmitter.js';
-// Combat and WaveManager commented out for Phase 2
+import { Combat } from './Combat.js';
+// WaveManager commented out for Phase 2
 // import { Airbase } from './Airbase.js';
-// import { Combat } from './Combat.js';
 // import { WaveManager } from '../scenario/WaveManager.js';
 
 // Bandit ID letters for naming hostile flights
@@ -49,8 +49,8 @@ export class Simulation {
     this.mergeAnnounced = new Set(); // Track pairs that have merged
     this.autoPauseReason = null; // Last auto-pause reason
 
-    // Commented out for Phase 2
-    // this.combat = new Combat(this);
+    // Combat system
+    this.combat = new Combat(this);
     // this.waveManager = null;
   }
 
@@ -167,12 +167,15 @@ export class Simulation {
       }
     }
 
-    // Update hostiles (future)
+    // Update hostiles
     for (const flight of this.hostiles) {
       for (const aircraft of flight.aircraft) {
         aircraft.update(scaledDelta);
       }
     }
+
+    // Update combat system (missiles, merges)
+    this.combat.update(scaledDelta);
 
     // Check auto-pause triggers
     this.checkAutoPauseTriggers();

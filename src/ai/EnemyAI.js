@@ -1,8 +1,8 @@
-import { wrapDeg } from '../util/math.js';
+import { wrapDeg, m2nm } from '../util/math.js';
 
 /**
  * AI controller for hostile aircraft
- * Handles state machine for INGRESS, ENGAGE, EGRESS states
+ * Handles state machine for INGRESS, ENGAGE, EGRESS, DEFENSIVE states
  */
 export class EnemyAI {
   constructor(aircraft, simulation) {
@@ -17,9 +17,26 @@ export class EnemyAI {
     // Target/objective
     this.objective = null;        // Strike target or patrol point (defaults to bullseye)
     this.engageTarget = null;     // Aircraft we're fighting
+
+    // Weapon employment tracking
+    this.lastMissileLaunchTime = 0;
+    this.activeMissile = null;
+
+    // Defensive tracking
+    this.defensiveStartTime = 0;
+    this.notchHeading = null;
   }
 
   update(delta) {
+    // Check for threats before normal state handling
+    if (this.shouldGoDefensive()) {
+      if (this.state !== 'DEFENSIVE') {
+        this.state = 'DEFENSIVE';
+        this.defensiveStartTime = this.simulation.time;
+        this.notchHeading = null;
+      }
+    }
+
     switch (this.state) {
       case 'INGRESS':
         this.handleIngress(delta);
@@ -81,7 +98,14 @@ export class EnemyAI {
     let heading = Math.atan2(dx, dy) * 180 / Math.PI;
     this.aircraft.setHeading(wrapDeg(heading));
 
-    // Future: weapon employment, BVR logic
+    // Check range and fire if appropriate
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const rangeNm = m2nm(distance);
+
+    // Enemy AI is always weapons free - fire when in envelope
+    if (this.canFireMissile() && this.isInFiringEnvelope(rangeNm)) {
+      this.fireMissile();
+    }
   }
 
   handleEgress(delta) {
@@ -97,8 +121,90 @@ export class EnemyAI {
   }
 
   handleDefensive(delta) {
-    // Future: evasive maneuvering
-    // For now, just try to turn away from threat
+    const threats = this.simulation.combat.getThreatsTo(this.aircraft);
+
+    if (threats.length === 0) {
+      // No more threats - resume previous behavior
+      const defensiveTime = this.simulation.time - this.defensiveStartTime;
+      if (defensiveTime > 3) {
+        if (this.engageTarget && this.engageTarget.isAlive()) {
+          this.state = 'ENGAGE';
+        } else {
+          this.state = 'INGRESS';
+        }
+        this.notchHeading = null;
+        return;
+      }
+    }
+
+    // Get closest threat and notch it
+    const closestThreat = this.simulation.combat.getClosestThreat(this.aircraft);
+
+    if (closestThreat) {
+      // Calculate notch heading (perpendicular to threat)
+      if (this.notchHeading === null) {
+        this.notchHeading = this.calculateNotchHeading(closestThreat);
+      }
+
+      this.aircraft.setHeading(this.notchHeading);
+    }
+  }
+
+  // Combat methods
+
+  /**
+   * Check if we can fire a missile (cooldown elapsed and have weapons)
+   */
+  canFireMissile() {
+    const timeSinceLast = this.simulation.time - this.lastMissileLaunchTime;
+    if (timeSinceLast < 5) return false;  // 5 second cooldown
+
+    // Check if we have weapons
+    return this.aircraft.getBestBVRWeapon() !== null;
+  }
+
+  /**
+   * Check if target is in firing envelope
+   */
+  isInFiringEnvelope(rangeNm) {
+    // More aggressive enemies fire from farther out
+    const maxRange = 30 + (this.aggression * 15);  // 30-45nm
+    const minRange = 2;
+
+    return rangeNm >= minRange && rangeNm <= maxRange;
+  }
+
+  /**
+   * Fire a missile at the current target
+   */
+  fireMissile() {
+    const weaponCategory = this.aircraft.getBestBVRWeapon();
+    if (!weaponCategory) return;
+
+    const weaponInfo = this.aircraft.weaponInventory[weaponCategory];
+    if (!weaponInfo || weaponInfo.count <= 0) return;
+
+    const weaponType = weaponInfo.type;
+
+    // Consume weapon from inventory
+    this.aircraft.consumeWeapon(weaponCategory);
+
+    // Launch missile via combat manager
+    const missile = this.simulation.combat.launchMissile(
+      this.aircraft,
+      this.engageTarget,
+      weaponType
+    );
+
+    if (missile) {
+      this.activeMissile = missile;
+      this.lastMissileLaunchTime = this.simulation.time;
+
+      // Auto-pause on missile launch (enemy fires too!)
+      if (this.simulation.autoPauseSettings.missileLaunch) {
+        this.simulation.triggerAutoPause(`${this.aircraft.callsign} ${missile.getBrevityCode()}`);
+      }
+    }
   }
 
   // Decision methods
@@ -138,14 +244,47 @@ export class EnemyAI {
     return dist < engageRange;
   }
 
-  shouldEvade(threat) {
-    // Future: check if threat is shooting at us
+  shouldGoDefensive() {
+    // Check for inbound missiles
+    const threats = this.simulation.combat.getThreatsTo(this.aircraft);
+    if (threats.length === 0) return false;
+
+    // Go defensive if threat is within 15nm (enemies are less cautious)
+    for (const missile of threats) {
+      const range = m2nm(missile.getRangeToTarget());
+      if (range < 15) return true;
+    }
+
     return false;
   }
 
-  shouldNotch(missile) {
-    // Future: notch incoming missiles
-    return false;
+  /**
+   * Calculate heading to notch (fly perpendicular to) an incoming missile
+   */
+  calculateNotchHeading(missile) {
+    // Get bearing from missile to us
+    const dx = this.aircraft.position.x - missile.position.x;
+    const dy = this.aircraft.position.y - missile.position.y;
+    const bearingFromMissile = Math.atan2(dx, dy) * 180 / Math.PI;
+
+    // Notch by flying perpendicular (±90 degrees)
+    const perpRight = wrapDeg(bearingFromMissile + 90);
+    const perpLeft = wrapDeg(bearingFromMissile - 90);
+
+    // Pick the heading closer to our current heading (quicker turn)
+    const diffRight = Math.abs(this.normalizeAngle(perpRight - this.aircraft.heading));
+    const diffLeft = Math.abs(this.normalizeAngle(perpLeft - this.aircraft.heading));
+
+    return diffRight < diffLeft ? perpRight : perpLeft;
+  }
+
+  /**
+   * Normalize angle to -180 to 180 range
+   */
+  normalizeAngle(angle) {
+    while (angle > 180) angle -= 360;
+    while (angle < -180) angle += 360;
+    return angle;
   }
 
   selectTarget() {

@@ -617,7 +617,9 @@ export class CommandParser {
       'DISREGARD': /\bDISREGARD\b/i,
       'BOGEY_DOPE': /\bBOGEY\s*DOPE\b/i,
       'PICTURE': /\bPICTURE\b/i,
-      'ENGAGE': /\bENGAGE\b/i
+      'ENGAGE': /\bENGAGE\b/i,
+      'EXTEND': /\bEXTEND\b/i,
+      'PRESS': /\bPRESS\b/i
     };
 
     for (const [type, pattern] of Object.entries(commandPatterns)) {

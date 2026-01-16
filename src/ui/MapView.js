@@ -23,6 +23,9 @@ export class MapView {
 
     // Hover state
     this.hoveredTrackId = null;
+
+    // Combat system reference (set by main.js)
+    this.simulation = null;
   }
 
   init(center, zoom) {
@@ -160,10 +163,43 @@ export class MapView {
       this.drawBullseye(this.bullseye.lat, this.bullseye.lon);
     }
 
-    // Draw all tracks
+    // Draw all tracks (skip aircraft in merges - they're abstracted)
+    const mergedAircraft = this.getMergedAircraftIds();
     for (const [id, trackData] of this.tracks) {
+      // Skip dead aircraft
+      if (!trackData.aircraft.isAlive()) continue;
+      // Skip aircraft in merges (they're shown as furball icon)
+      if (mergedAircraft.has(trackData.aircraft.id)) continue;
       this.drawTrack(trackData.aircraft, trackData.selected);
     }
+
+    // Draw missiles
+    if (this.simulation && this.simulation.combat) {
+      for (const missile of this.simulation.combat.activeMissiles) {
+        this.drawMissile(missile);
+      }
+
+      // Draw merges (furball icons)
+      for (const merge of this.simulation.combat.activeMerges) {
+        this.drawMerge(merge);
+      }
+    }
+  }
+
+  /**
+   * Get IDs of all aircraft currently in merges
+   * @returns {Set<string>}
+   */
+  getMergedAircraftIds() {
+    const ids = new Set();
+    if (this.simulation && this.simulation.combat) {
+      for (const merge of this.simulation.combat.activeMerges) {
+        for (const ac of merge.getAllParticipants()) {
+          ids.add(ac.id);
+        }
+      }
+    }
+    return ids;
   }
 
   drawBullseye(lat, lon) {
@@ -330,11 +366,122 @@ export class MapView {
   }
 
   drawMissile(missile) {
-    // Future implementation
+    if (!missile || missile.isDead()) return;
+
+    // Get missile position in geo coordinates
+    const geoPos = this.simulation.geoRef.toGeo(missile.position.x, missile.position.y);
+    const point = this.map.latLngToContainerPoint([geoPos.lat, geoPos.lon]);
+    const ctx = this.ctx;
+
+    ctx.save();
+
+    // Color based on shooter side
+    const color = missile.shooter?.side === 'blue' ? '#00FF00' : '#FF8800';
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+
+    // Draw missile as small triangle pointing in direction of travel
+    const size = 6;
+    const headingRad = missile.heading * Math.PI / 180;
+
+    ctx.translate(point.x, point.y);
+    ctx.rotate(headingRad);
+
+    ctx.beginPath();
+    ctx.moveTo(0, -size);           // Nose
+    ctx.lineTo(size * 0.5, size);   // Right
+    ctx.lineTo(-size * 0.5, size);  // Left
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+
+    // Draw trail (velocity vector showing direction)
+    ctx.save();
+    ctx.strokeStyle = color + '80'; // Semi-transparent
+    ctx.lineWidth = 1;
+    const trailLength = 20;
+
+    ctx.beginPath();
+    ctx.moveTo(point.x, point.y);
+    ctx.lineTo(
+      point.x - trailLength * Math.sin(headingRad),
+      point.y + trailLength * Math.cos(headingRad)
+    );
+    ctx.stroke();
+    ctx.restore();
+
+    // Draw state indicator for active/terminal missiles
+    if (missile.state === 'active' || missile.state === 'terminal') {
+      ctx.save();
+      ctx.strokeStyle = missile.state === 'terminal' ? '#FF0000' : '#FFFF00';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 8, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   drawMerge(merge) {
-    // Future implementation
+    if (!merge || merge.state === 'resolved') return;
+
+    // Get merge centroid position
+    const geoPos = this.simulation.geoRef.toGeo(merge.position.x, merge.position.y);
+    const point = this.map.latLngToContainerPoint([geoPos.lat, geoPos.lon]);
+    const ctx = this.ctx;
+
+    ctx.save();
+
+    // Draw furball icon - overlapping circles representing chaos
+    const size = 20;
+
+    // Outer pulsing ring (yellow/orange for danger)
+    ctx.strokeStyle = '#FFA500';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, size, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Inner crossed swords / chaos pattern
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 2;
+
+    // Draw X pattern
+    ctx.beginPath();
+    ctx.moveTo(point.x - size * 0.6, point.y - size * 0.6);
+    ctx.lineTo(point.x + size * 0.6, point.y + size * 0.6);
+    ctx.moveTo(point.x + size * 0.6, point.y - size * 0.6);
+    ctx.lineTo(point.x - size * 0.6, point.y + size * 0.6);
+    ctx.stroke();
+
+    // Draw small dots for participants
+    const blueCount = merge.participants.blue.length;
+    const redCount = merge.participants.red.length;
+
+    // Blue dots on left
+    ctx.fillStyle = '#00BFFF';
+    for (let i = 0; i < blueCount; i++) {
+      ctx.beginPath();
+      ctx.arc(point.x - size - 5, point.y - 8 + i * 10, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Red dots on right
+    ctx.fillStyle = '#FF4444';
+    for (let i = 0; i < redCount; i++) {
+      ctx.beginPath();
+      ctx.arc(point.x + size + 5, point.y - 8 + i * 10, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Label
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('MERGE', point.x, point.y + size + 12);
+
+    ctx.restore();
   }
 
   drawAirbase(airbase) {
@@ -436,6 +583,14 @@ export class MapView {
    */
   setTrackDatabox(databox) {
     this.trackDatabox = databox;
+  }
+
+  /**
+   * Set the simulation reference for combat rendering
+   * @param {Simulation} simulation
+   */
+  setSimulation(simulation) {
+    this.simulation = simulation;
   }
 
   set onTrackClick(callback) {

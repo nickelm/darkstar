@@ -129,6 +129,9 @@ class Darkstar {
     // Wire up map view to track databox
     this.mapView.setTrackDatabox(this.trackDatabox);
 
+    // Wire up map view to simulation for combat rendering
+    this.mapView.setSimulation(this.simulation);
+
     // Set up global keyboard shortcuts
     this.setupKeyboardShortcuts();
 

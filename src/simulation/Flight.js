@@ -10,6 +10,9 @@ export class Flight {
 
     this.commandHistory = [];
 
+    // Combat state
+    this.weaponsAuthorization = 'hold';  // 'hold' | 'free'
+
     // Formation properties
     this.formationType = config.formationType || 'finger-four';
     this.formationSpacing = config.formationSpacing || 500; // meters

@@ -74,6 +74,10 @@ export class CommandExecutor {
         return this.executeResume(flight);
       case 'DISREGARD':
         return this.executeDisregard(flight);
+      case 'EXTEND':
+        return this.executeExtend(flight);
+      case 'PRESS':
+        return this.executePress(flight);
       default:
         console.warn(`Unhandled command type: ${command.type}`);
         return false;
@@ -137,18 +141,55 @@ export class CommandExecutor {
         return this.executeEngageForAircraft(aircraft, command.params);
 
       case 'WEAPONS_FREE':
+        aircraft.weaponsAuthorization = 'free';
+        if (aircraft.ai && aircraft.ai.onWeaponsFree) {
+          aircraft.ai.onWeaponsFree();
+        }
+        this.simulation.events.emit('weapons:authorization', {
+          aircraft,
+          state: 'free'
+        });
         console.log(`${aircraft.callsign}: WEAPONS FREE`);
         return true;
 
       case 'WEAPONS_HOLD':
+        aircraft.weaponsAuthorization = 'hold';
+        if (aircraft.ai && aircraft.ai.onWeaponsHold) {
+          aircraft.ai.onWeaponsHold();
+        }
+        this.simulation.events.emit('weapons:authorization', {
+          aircraft,
+          state: 'hold'
+        });
         console.log(`${aircraft.callsign}: WEAPONS HOLD`);
         return true;
 
       case 'DEFENSIVE':
+        aircraft.aiState = 'defensive';
+        aircraft.engagementPhase = 'notching';
+        if (aircraft.ai) {
+          aircraft.ai.state = 'DEFENSIVE';
+          aircraft.ai.defensiveStartTime = this.simulation.time;
+          aircraft.ai.notchHeading = null;
+        }
+        this.simulation.events.emit('command:defensive', { aircraft });
         console.log(`${aircraft.callsign}: DEFENSIVE`);
         return true;
 
       case 'RECOMMIT':
+        if (aircraft.ai) {
+          if (aircraft.ai.target && aircraft.ai.target.isAlive()) {
+            aircraft.ai.state = 'INTERCEPT';
+            aircraft.aiState = 'intercept';
+            aircraft.engagementPhase = 'committed';
+          } else {
+            aircraft.ai.state = 'IDLE';
+            aircraft.aiState = 'idle';
+            aircraft.engagementPhase = 'none';
+          }
+          aircraft.ai.notchHeading = null;
+        }
+        this.simulation.events.emit('pilot:recommit', { aircraft });
         console.log(`${aircraft.callsign}: RECOMMIT`);
         return true;
 
@@ -158,6 +199,24 @@ export class CommandExecutor {
 
       case 'DISREGARD':
         console.log(`${aircraft.callsign}: DISREGARD`);
+        return true;
+
+      case 'EXTEND':
+        // Find merge involving this aircraft and request extend
+        const extendMerge = this.simulation.combat.findMergeForAircraft(aircraft);
+        if (extendMerge) {
+          extendMerge.applyExtend(aircraft.side);
+        }
+        console.log(`${aircraft.callsign}: EXTEND`);
+        return true;
+
+      case 'PRESS':
+        // Find merge involving this aircraft and request press
+        const pressMerge = this.simulation.combat.findMergeForAircraft(aircraft);
+        if (pressMerge) {
+          pressMerge.applyPress(aircraft.side);
+        }
+        console.log(`${aircraft.callsign}: PRESS`);
         return true;
 
       default:
@@ -309,25 +368,93 @@ export class CommandExecutor {
   }
 
   executeWeaponsFree(flight) {
-    // Future implementation
+    // Set weapons authorization for flight and all aircraft
+    flight.weaponsAuthorization = 'free';
+
+    for (const aircraft of flight.aircraft) {
+      aircraft.weaponsAuthorization = 'free';
+
+      // Notify AI of weapons free status
+      if (aircraft.ai && aircraft.ai.onWeaponsFree) {
+        aircraft.ai.onWeaponsFree();
+      }
+    }
+
+    // Emit event for UI/voice feedback
+    this.simulation.events.emit('weapons:authorization', {
+      flight,
+      state: 'free'
+    });
+
     console.log(`${flight.callsign}: WEAPONS FREE`);
     return true;
   }
 
   executeWeaponsHold(flight) {
-    // Future implementation
+    // Set weapons authorization for flight and all aircraft
+    flight.weaponsAuthorization = 'hold';
+
+    for (const aircraft of flight.aircraft) {
+      aircraft.weaponsAuthorization = 'hold';
+
+      // Notify AI of weapons hold status
+      if (aircraft.ai && aircraft.ai.onWeaponsHold) {
+        aircraft.ai.onWeaponsHold();
+      }
+    }
+
+    // Emit event for UI/voice feedback
+    this.simulation.events.emit('weapons:authorization', {
+      flight,
+      state: 'hold'
+    });
+
     console.log(`${flight.callsign}: WEAPONS HOLD`);
     return true;
   }
 
   executeDefensive(flight) {
-    // Future implementation
+    // Set all aircraft in flight to defensive state
+    for (const aircraft of flight.aircraft) {
+      aircraft.aiState = 'defensive';
+      aircraft.engagementPhase = 'notching';
+
+      // Notify AI to go defensive
+      if (aircraft.ai) {
+        aircraft.ai.state = 'DEFENSIVE';
+        aircraft.ai.defensiveStartTime = this.simulation.time;
+        aircraft.ai.notchHeading = null;  // Will be calculated on next update
+      }
+    }
+
+    // Emit event for UI/voice feedback
+    this.simulation.events.emit('command:defensive', { flight });
+
     console.log(`${flight.callsign}: DEFENSIVE`);
     return true;
   }
 
   executeRecommit(flight) {
-    // Future implementation
+    // Resume attack after defensive
+    for (const aircraft of flight.aircraft) {
+      if (aircraft.ai) {
+        // If we have a target, go back to intercept; otherwise idle
+        if (aircraft.ai.target && aircraft.ai.target.isAlive()) {
+          aircraft.ai.state = 'INTERCEPT';
+          aircraft.aiState = 'intercept';
+          aircraft.engagementPhase = 'committed';
+        } else {
+          aircraft.ai.state = 'IDLE';
+          aircraft.aiState = 'idle';
+          aircraft.engagementPhase = 'none';
+        }
+        aircraft.ai.notchHeading = null;
+      }
+    }
+
+    // Emit event for UI/voice feedback
+    this.simulation.events.emit('pilot:recommit', { flight });
+
     console.log(`${flight.callsign}: RECOMMIT`);
     return true;
   }
@@ -382,6 +509,28 @@ export class CommandExecutor {
   executePicture() {
     // Future implementation
     console.log('PICTURE request');
+    return true;
+  }
+
+  executeExtend(flight) {
+    // Request disengage from merge for this flight
+    this.simulation.combat.requestExtend(flight);
+
+    // Emit event for UI/voice feedback
+    this.simulation.events.emit('command:extend', { flight });
+
+    console.log(`${flight.callsign}: EXTEND`);
+    return true;
+  }
+
+  executePress(flight) {
+    // Request aggressive posture in merge for this flight
+    this.simulation.combat.requestPress(flight);
+
+    // Emit event for UI/voice feedback
+    this.simulation.events.emit('command:press', { flight });
+
+    console.log(`${flight.callsign}: PRESS`);
     return true;
   }
 }
